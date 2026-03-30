@@ -60,5 +60,8 @@
     "typescript": "^5.9.2",
     "vite": "^6.3.6",
     "vitest": "^4.1.0"
+  },
+  "overrides": {
+    "picomatch": "^4.0.4"
   }
 }
