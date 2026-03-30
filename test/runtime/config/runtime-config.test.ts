@@ -73,6 +73,15 @@ function writeFakeCommand(binDir: string, command: string): void {
 	chmodSync(scriptPath, 0o755);
 }
 
+async function withUnsupportedAgentPath<T>(home: string, run: () => Promise<T>): Promise<T> {
+	const { path: tempBin, cleanup: cleanupBin } = createTempDir("kanban-bin-runtime-config-empty-");
+	try {
+		return await withTemporaryEnv({ home, pathPrefix: tempBin, replacePath: true }, run);
+	} finally {
+		cleanupBin();
+	}
+}
+
 describe.sequential("runtime-config auto agent selection", () => {
 	it("selects agents using the configured priority order", () => {
 		expect(pickBestInstalledAgentIdFromDetected(["codex", "opencode", "gemini"])).toBe("codex");
@@ -169,7 +178,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-home-scope-");
 
 		try {
-			await withTemporaryEnv({ home: tempHome }, async () => {
+			await withUnsupportedAgentPath(tempHome, async () => {
 				const state = await loadRuntimeConfig(tempHome);
 				expect(state.globalConfigPath).toBe(getGlobalRuntimeConfigPath(tempHome));
 				expect(state.projectConfigPath).toBeNull();
@@ -180,13 +189,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 				});
 				expect(updated.selectedAgentId).toBe("codex");
 				expect(updated.projectConfigPath).toBeNull();
-
-				const globalPayload = JSON.parse(readFileSync(getGlobalRuntimeConfigPath(tempHome), "utf8")) as {
-					selectedAgentId?: string;
-					shortcuts?: unknown;
-				};
-				expect(globalPayload.selectedAgentId).toBeUndefined();
-				expect(globalPayload.shortcuts).toBeUndefined();
+				expect(existsSync(getGlobalRuntimeConfigPath(tempHome))).toBe(false);
 			});
 		} finally {
 			cleanupHome();
@@ -386,24 +389,14 @@ describe.sequential("runtime-config auto agent selection", () => {
 		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-partial-");
 
 		try {
-			await withTemporaryEnv({ home: tempHome }, async () => {
+			await withUnsupportedAgentPath(tempHome, async () => {
 				await loadRuntimeConfig(tempProject);
 
 				const updated = await updateRuntimeConfig(tempProject, {
 					selectedAgentId: "codex",
 				});
 				expect(updated.selectedAgentId).toBe("codex");
-
-				const globalPayload = JSON.parse(readFileSync(getGlobalRuntimeConfigPath(tempHome), "utf8")) as {
-					selectedAgentId?: string;
-					selectedShortcutLabel?: string;
-					agentAutonomousModeEnabled?: boolean;
-					readyForReviewNotificationsEnabled?: boolean;
-				};
-				expect(globalPayload.selectedAgentId).toBeUndefined();
-				expect(globalPayload.selectedShortcutLabel).toBeUndefined();
-				expect(globalPayload.agentAutonomousModeEnabled).toBeUndefined();
-				expect(globalPayload.readyForReviewNotificationsEnabled).toBeUndefined();
+				expect(existsSync(getGlobalRuntimeConfigPath(tempHome))).toBe(false);
 			});
 		} finally {
 			cleanupProject();
