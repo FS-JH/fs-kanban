@@ -1,6 +1,5 @@
-import * as Sentry from "@sentry/react";
 import { RefreshCw, RotateCcw, TriangleAlert } from "lucide-react";
-import type { ReactElement, ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactElement, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 
@@ -11,7 +10,7 @@ function AppErrorFallback({
 	error: unknown;
 	resetError: () => void;
 }): ReactElement {
-	const message = error instanceof Error ? error.message : "Cline hit an unexpected UI error.";
+	const message = error instanceof Error ? error.message : "FS Kanban hit an unexpected UI error.";
 
 	return (
 		<div className="min-h-screen bg-surface-0 text-text-primary flex items-center justify-center p-6">
@@ -21,7 +20,7 @@ function AppErrorFallback({
 						<TriangleAlert size={18} />
 					</div>
 					<div>
-						<h1 className="text-lg font-semibold">Cline hit an unexpected UI error.</h1>
+						<h1 className="text-lg font-semibold">FS Kanban hit an unexpected UI error.</h1>
 						<p className="mt-1 text-sm text-text-secondary">
 							You can try rendering the app again or reload the page.
 						</p>
@@ -50,15 +49,31 @@ function AppErrorFallback({
 	);
 }
 
-export function AppErrorBoundary({ children }: { children: ReactNode }): ReactElement {
-	return (
-		<Sentry.ErrorBoundary
-			beforeCapture={(scope) => {
-				scope.setTag("boundary", "root_app");
-			}}
-			fallback={({ error, resetError }) => <AppErrorFallback error={error} resetError={resetError} />}
-		>
-			{children}
-		</Sentry.ErrorBoundary>
-	);
+interface AppErrorBoundaryState {
+	error: unknown | null;
+}
+
+export class AppErrorBoundary extends Component<{ children: ReactNode }, AppErrorBoundaryState> {
+	override state: AppErrorBoundaryState = {
+		error: null,
+	};
+
+	static getDerivedStateFromError(error: unknown): AppErrorBoundaryState {
+		return { error };
+	}
+
+	override componentDidCatch(error: unknown, errorInfo: ErrorInfo): void {
+		console.error("Unhandled UI error", error, errorInfo);
+	}
+
+	private readonly resetError = (): void => {
+		this.setState({ error: null });
+	};
+
+	override render(): ReactNode {
+		if (this.state.error) {
+			return <AppErrorFallback error={this.state.error} resetError={this.resetError} />;
+		}
+		return this.props.children;
+	}
 }

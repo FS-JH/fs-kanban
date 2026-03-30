@@ -335,13 +335,13 @@ describe.sequential("task-worktree integration", () => {
 				expect(deleted.ok).toBe(true);
 				expect(deleted.removed).toBe(true);
 
-				const patchPath = join(
-					process.env.HOME ?? sandboxRoot,
-					".cline",
-					"kanban",
-					"trashed-task-patches",
-					`${taskId}.${createdCommit}.patch`,
-				);
+					const patchPath = join(
+						process.env.HOME ?? sandboxRoot,
+						".config",
+						"fs-kanban",
+						"trashed-task-patches",
+						`${taskId}.${createdCommit}.patch`,
+					);
 				expect(existsSync(patchPath)).toBe(true);
 				expect(readFileSync(patchPath, "utf8")).toContain("tracked.txt");
 				expect(readFileSync(patchPath, "utf8")).toContain("notes.txt");
@@ -406,12 +406,12 @@ describe.sequential("task-worktree integration", () => {
 				});
 				expect(deleted.ok).toBe(true);
 
-				const patchesDir = join(
-					process.env.HOME ?? sandboxRoot,
-					".cline",
-					"kanban",
-					"trashed-task-patches",
-				);
+					const patchesDir = join(
+						process.env.HOME ?? sandboxRoot,
+						".config",
+						"fs-kanban",
+						"trashed-task-patches",
+					);
 				mkdirSync(patchesDir, { recursive: true });
 				const patchPath = join(patchesDir, `${taskId}.${createdCommit}.patch`);
 				writeFileSync(

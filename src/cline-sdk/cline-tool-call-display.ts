@@ -3,231 +3,122 @@ export interface ClineToolCallDisplay {
 	inputSummary: string | null;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+function normalizeWhitespace(value: string): string {
+	return value.replace(/\s+/g, " ").trim();
 }
 
-function formatArraySummary(values: unknown[]): string | null {
-	if (values.length === 0) {
+function truncate(value: string, maxLength = 80): string {
+	if (value.length <= maxLength) {
+		return value;
+	}
+	return `${value.slice(0, maxLength - 1)}…`;
+}
+
+function formatReadFilesSummary(parsed: unknown): string | null {
+	const toRange = (file: Record<string, unknown>): string | null => {
+		const path = typeof file.path === "string" ? file.path : typeof file.filePath === "string" ? file.filePath : null;
+		if (!path) {
+			return null;
+		}
+		const start = typeof file.start_line === "number" ? file.start_line : 1;
+		const end = typeof file.end_line === "number" ? file.end_line : start;
+		const hasRange = "start_line" in file || "end_line" in file;
+		return hasRange ? `${path}:${start}-${end}` : path;
+	};
+
+	if (Array.isArray(parsed)) {
+		const paths = parsed.filter((value): value is string => typeof value === "string");
+		return paths.length > 0 ? paths.join(", ") : null;
+	}
+	if (!parsed || typeof parsed !== "object") {
 		return null;
 	}
-	const first = String(values[0]).split("\n")[0]?.trim();
-	if (!first) {
-		return null;
+	const record = parsed as Record<string, unknown>;
+	if (Array.isArray(record.file_paths)) {
+		const paths = record.file_paths.filter((value): value is string => typeof value === "string");
+		return paths.length > 0 ? paths.join(", ") : null;
 	}
-	return values.length > 1 ? `${first} (+${values.length - 1} more)` : first;
-}
-
-function formatArrayList(values: unknown[]): string | null {
-	const items = values
-		.map((value) => String(value).split("\n")[0]?.trim())
-		.filter((value): value is string => Boolean(value));
-
-	if (items.length === 0) {
-		return null;
+	if (Array.isArray(record.files)) {
+		const files = record.files
+			.filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null)
+			.map(toRange)
+			.filter((value): value is string => Boolean(value));
+		return files.length > 0 ? files.join(", ") : null;
 	}
-
-	return items.join(", ");
-}
-
-function normalizeToolName(toolName: string): string {
-	return toolName.toLowerCase().replace(/[^a-z]/g, "");
-}
-
-function normalizeDisplayToolName(toolName: string | null | undefined): string {
-	if (typeof toolName !== "string") {
-		return "unknown";
-	}
-	const trimmed = toolName.trim();
-	return trimmed.length > 0 ? trimmed : "unknown";
-}
-
-function summarizeStringInput(input: string): string | null {
-	const firstLine = input.split("\n").find((line) => line.trim().length > 0);
-	return firstLine ? firstLine.trim().slice(0, 120) : null;
-}
-
-function appendReadFileSummary(summaries: string[], value: unknown): void {
-	if (typeof value === "string") {
-		const trimmed = value.trim();
-		if (trimmed.length > 0) {
-			summaries.push(trimmed);
-		}
-		return;
-	}
-
-	if (!isRecord(value)) {
-		return;
-	}
-
-	const path =
-		typeof value.path === "string"
-			? value.path.trim()
-			: typeof value.file_path === "string"
-				? value.file_path.trim()
-				: typeof value.filePath === "string"
-					? value.filePath.trim()
-				: "";
-	if (path.length === 0) {
-		return;
-	}
-
-	const startLine = Number.isInteger(value.start_line) ? Number(value.start_line) : null;
-	const endLine = Number.isInteger(value.end_line) ? Number(value.end_line) : null;
-
-	if (startLine === null && endLine === null) {
-		summaries.push(path);
-		return;
-	}
-
-	const start = startLine ?? 1;
-	const end = endLine ?? "EOF";
-	summaries.push(`${path}:${start}-${end}`);
-}
-
-function extractReadFileSummaries(input: unknown): string[] {
-	const summaries: string[] = [];
-
-	if (typeof input === "string") {
-		appendReadFileSummary(summaries, input);
-		return Array.from(new Set(summaries));
-	}
-
-	if (Array.isArray(input)) {
-		for (const value of input) {
-			appendReadFileSummary(summaries, value);
-		}
-		return Array.from(new Set(summaries));
-	}
-
-	if (!isRecord(input)) {
-		return summaries;
-	}
-
-	appendReadFileSummary(summaries, input);
-
-	const filePaths = input.file_paths;
-	if (typeof filePaths === "string") {
-		appendReadFileSummary(summaries, filePaths);
-	} else if (Array.isArray(filePaths)) {
-		for (const value of filePaths) {
-			appendReadFileSummary(summaries, value);
-		}
-	}
-
-	const files = input.files;
-	if (Array.isArray(files)) {
-		for (const value of files) {
-			appendReadFileSummary(summaries, value);
-		}
-	} else if (files !== undefined) {
-		appendReadFileSummary(summaries, files);
-	}
-
-	return Array.from(new Set(summaries));
-}
-
-function parseToolInput(input: unknown): unknown {
-	if (typeof input !== "string") {
-		return input;
-	}
-
-	try {
-		return JSON.parse(input) as unknown;
-	} catch {
-		return input;
-	}
-}
-
-function summarizeParsedToolInput(toolName: string, input: unknown): string | null {
-	if (input === null || input === undefined) {
-		return null;
-	}
-
-	const normalizedToolName = normalizeToolName(toolName);
-
-	if (normalizedToolName === "readfiles") {
-		const readFileSummaries = extractReadFileSummaries(input);
-		return readFileSummaries.length > 0 ? formatArrayList(readFileSummaries) : null;
-	}
-
-	if (isRecord(input)) {
-		const record = input;
-
-		switch (normalizedToolName) {
-			case "runcommands": {
-				if (Array.isArray(record.commands)) {
-					return formatArraySummary(record.commands);
-				}
-				break;
-			}
-			case "searchcodebase": {
-				if (Array.isArray(record.queries)) {
-					return formatArraySummary(record.queries);
-				}
-				break;
-			}
-			case "editor": {
-				const path = record.path;
-				const command = record.command;
-				if (typeof path === "string") {
-					return typeof command === "string" ? `${command} ${path}` : path;
-				}
-				break;
-			}
-			case "fetchwebcontent": {
-				if (Array.isArray(record.requests) && record.requests.length > 0) {
-					const first = record.requests[0];
-					if (typeof first === "object" && first !== null && "url" in first) {
-						const url = String((first as Record<string, unknown>).url);
-						return record.requests.length > 1 ? `${url} (+${record.requests.length - 1} more)` : url;
-					}
-				}
-				break;
-			}
-			case "skills": {
-				if (typeof record.skill === "string") {
-					return record.skill;
-				}
-				break;
-			}
-			case "askquestion": {
-				if (typeof record.question === "string") {
-					return record.question.split("\n")[0] ?? null;
-				}
-				break;
-			}
-		}
-
-		for (const value of Object.values(record)) {
-			if (typeof value === "string" && value.trim().length > 0) {
-				return value.trim().split("\n")[0]?.slice(0, 120) ?? null;
-			}
-			if (Array.isArray(value) && value.length > 0 && typeof value[0] === "string") {
-				return formatArraySummary(value);
-			}
-		}
-	}
-
-	if (typeof input === "string") {
-		return summarizeStringInput(input);
-	}
-
 	return null;
 }
 
-export function getClineToolCallDisplay(toolName: string | null | undefined, input: unknown): ClineToolCallDisplay {
-	const normalizedToolName = normalizeDisplayToolName(toolName);
-	const parsedInput = parseToolInput(input);
+function formatFetchWebSummary(parsed: unknown): string | null {
+	if (!parsed || typeof parsed !== "object") {
+		return null;
+	}
+	const requests = (parsed as { requests?: unknown }).requests;
+	if (!Array.isArray(requests) || requests.length === 0) {
+		return null;
+	}
+	const urls = requests
+		.map((request) =>
+			typeof request === "object" && request !== null && typeof (request as { url?: unknown }).url === "string"
+				? (request as { url: string }).url
+				: null,
+		)
+		.filter((value): value is string => Boolean(value));
+	if (urls.length === 0) {
+		return null;
+	}
+	const firstUrl = urls[0] ?? null;
+	if (!firstUrl) {
+		return null;
+	}
+	return urls.length === 1 ? firstUrl : `${firstUrl} (+${urls.length - 1} more)`;
+}
 
+function readInputSummary(input: unknown, toolName: string): string | null {
+	if (input == null) {
+		return null;
+	}
+	let parsed: unknown = input;
+	if (typeof input === "string") {
+		try {
+			parsed = JSON.parse(input) as unknown;
+		} catch {
+			return truncate(normalizeWhitespace(input));
+		}
+	}
+
+	const normalizedToolName = toolName.toLowerCase().replace(/[^a-z_]/g, "");
+	if (normalizedToolName === "fetch_web_content") {
+		return formatFetchWebSummary(parsed);
+	}
+	if (normalizedToolName === "read_files" || normalizedToolName === "readfiles") {
+		return formatReadFilesSummary(parsed);
+	}
+	if (typeof parsed === "string") {
+		return truncate(normalizeWhitespace(parsed));
+	}
+	if (Array.isArray(parsed)) {
+		return parsed.length > 0 ? truncate(normalizeWhitespace(JSON.stringify(parsed[0]))) : null;
+	}
+	if (parsed && typeof parsed === "object") {
+		const firstValue = Object.values(parsed as Record<string, unknown>).find((value) => value != null);
+		if (typeof firstValue === "string") {
+			return truncate(normalizeWhitespace(firstValue));
+		}
+		if (firstValue !== undefined) {
+			return truncate(normalizeWhitespace(JSON.stringify(firstValue)));
+		}
+	}
+	return null;
+}
+
+export function getClineToolCallDisplay(toolName: string, input: unknown): ClineToolCallDisplay {
+	const inputSummary = readInputSummary(input, toolName);
 	return {
-		toolName: normalizedToolName,
-		inputSummary: summarizeParsedToolInput(normalizedToolName, parsedInput),
+		toolName,
+		inputSummary,
 	};
 }
 
-export function formatClineToolCallLabel(toolName: string | null | undefined, inputSummary: string | null | undefined): string {
-	const normalizedToolName = normalizeDisplayToolName(toolName);
-	const normalizedInputSummary = typeof inputSummary === "string" ? inputSummary.trim() : "";
-	return normalizedInputSummary ? `${normalizedToolName}(${normalizedInputSummary})` : normalizedToolName;
+export function formatClineToolCallLabel(toolName: string, inputSummary: string | null): string {
+	return inputSummary ? `${toolName}: ${inputSummary}` : toolName;
 }

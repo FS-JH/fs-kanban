@@ -3,10 +3,10 @@ import { createServer, type IncomingMessage } from "node:http";
 import { join } from "node:path";
 
 import { createHTTPHandler } from "@trpc/server/adapters/standalone";
-import { handleClineMcpOauthCallback } from "../cline-sdk/cline-mcp-runtime-service.js";
+import { handleRuntimeMcpOauthCallback } from "../cline-sdk/cline-mcp-runtime-service.js";
 import {
-	type ClineTaskSessionService,
-	createInMemoryClineTaskSessionService,
+	type TaskSessionService,
+	createInMemoryTaskSessionService,
 } from "../cline-sdk/cline-task-session-service.js";
 import type { RuntimeCommandRunResponse, RuntimeWorkspaceStateResponse } from "../core/api-contract.js";
 import {
@@ -117,35 +117,35 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 
 	const getScopedTerminalManager = async (scope: RuntimeTrpcWorkspaceScope): Promise<TerminalSessionManager> =>
 		await deps.ensureTerminalManagerForWorkspace(scope.workspaceId, scope.workspacePath);
-	const clineTaskSessionServiceByWorkspaceId = new Map<string, ClineTaskSessionService>();
-	const getScopedClineTaskSessionService = async (
+	const taskSessionServiceByWorkspaceId = new Map<string, TaskSessionService>();
+	const getScopedTaskSessionService = async (
 		scope: RuntimeTrpcWorkspaceScope,
-	): Promise<ClineTaskSessionService> => {
-		let service = clineTaskSessionServiceByWorkspaceId.get(scope.workspaceId);
+	): Promise<TaskSessionService> => {
+		let service = taskSessionServiceByWorkspaceId.get(scope.workspaceId);
 		if (!service) {
-			service = createInMemoryClineTaskSessionService();
-			clineTaskSessionServiceByWorkspaceId.set(scope.workspaceId, service);
-			deps.runtimeStateHub.trackClineTaskSessionService(scope.workspaceId, scope.workspacePath, service);
+			service = createInMemoryTaskSessionService();
+			taskSessionServiceByWorkspaceId.set(scope.workspaceId, service);
+			deps.runtimeStateHub.trackTaskSessionService(scope.workspaceId, scope.workspacePath, service);
 		}
 		return service;
 	};
-	const disposeClineTaskSessionServiceAsync = async (workspaceId: string): Promise<void> => {
-		const service = clineTaskSessionServiceByWorkspaceId.get(workspaceId);
+	const disposeTaskSessionServiceAsync = async (workspaceId: string): Promise<void> => {
+		const service = taskSessionServiceByWorkspaceId.get(workspaceId);
 		if (!service) {
 			return;
 		}
-		clineTaskSessionServiceByWorkspaceId.delete(workspaceId);
+		taskSessionServiceByWorkspaceId.delete(workspaceId);
 		await service.dispose();
 	};
-	const disposeClineTaskSessionService = (workspaceId: string): void => {
-		void disposeClineTaskSessionServiceAsync(workspaceId);
+	const disposeTaskSessionService = (workspaceId: string): void => {
+		void disposeTaskSessionServiceAsync(workspaceId);
 	};
 	const prepareForStateReset = async (): Promise<void> => {
 		const workspaceIds = new Set<string>();
 		for (const { workspaceId } of deps.workspaceRegistry.listManagedWorkspaces()) {
 			workspaceIds.add(workspaceId);
 		}
-		for (const workspaceId of clineTaskSessionServiceByWorkspaceId.keys()) {
+		for (const workspaceId of taskSessionServiceByWorkspaceId.keys()) {
 			workspaceIds.add(workspaceId);
 		}
 		const activeWorkspaceId = deps.workspaceRegistry.getActiveWorkspaceId();
@@ -153,7 +153,7 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 			workspaceIds.add(activeWorkspaceId);
 		}
 		for (const workspaceId of workspaceIds) {
-			await disposeClineTaskSessionServiceAsync(workspaceId);
+			await disposeTaskSessionServiceAsync(workspaceId);
 			deps.disposeWorkspace(workspaceId, {
 				stopTerminalSessions: true,
 			});
@@ -171,18 +171,18 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 				getActiveWorkspaceId: deps.workspaceRegistry.getActiveWorkspaceId,
 				getActiveRuntimeConfig: deps.workspaceRegistry.getActiveRuntimeConfig,
 				loadScopedRuntimeConfig: deps.workspaceRegistry.loadScopedRuntimeConfig,
-				setActiveRuntimeConfig: deps.workspaceRegistry.setActiveRuntimeConfig,
-				getScopedTerminalManager,
-				getScopedClineTaskSessionService,
-				resolveInteractiveShellCommand: deps.resolveInteractiveShellCommand,
-				runCommand: deps.runCommand,
-				broadcastClineMcpAuthStatusesUpdated: deps.runtimeStateHub.broadcastClineMcpAuthStatusesUpdated,
-				bumpClineSessionContextVersion: deps.runtimeStateHub.bumpClineSessionContextVersion,
-				prepareForStateReset,
-			}),
+					setActiveRuntimeConfig: deps.workspaceRegistry.setActiveRuntimeConfig,
+					getScopedTerminalManager,
+					getScopedTaskSessionService,
+					resolveInteractiveShellCommand: deps.resolveInteractiveShellCommand,
+					runCommand: deps.runCommand,
+					broadcastMcpAuthStatusesUpdated: deps.runtimeStateHub.broadcastMcpAuthStatusesUpdated,
+					bumpSessionContextVersion: deps.runtimeStateHub.bumpSessionContextVersion,
+					prepareForStateReset,
+				}),
 			workspaceApi: createWorkspaceApi({
 				ensureTerminalManagerForWorkspace: deps.ensureTerminalManagerForWorkspace,
-				getScopedClineTaskSessionService,
+				getScopedTaskSessionService,
 				broadcastRuntimeWorkspaceStateUpdated: deps.runtimeStateHub.broadcastRuntimeWorkspaceStateUpdated,
 				broadcastRuntimeProjectsUpdated: deps.runtimeStateHub.broadcastRuntimeProjectsUpdated,
 				buildWorkspaceStateSnapshot: deps.workspaceRegistry.buildWorkspaceStateSnapshot,
@@ -201,7 +201,7 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 				broadcastRuntimeProjectsUpdated: deps.runtimeStateHub.broadcastRuntimeProjectsUpdated,
 				getTerminalManagerForWorkspace: deps.workspaceRegistry.getTerminalManagerForWorkspace,
 				disposeWorkspace: (workspaceId, options) => {
-					disposeClineTaskSessionService(workspaceId);
+					disposeTaskSessionService(workspaceId);
 					return deps.disposeWorkspace(workspaceId, options);
 				},
 				collectProjectWorktreeTaskIdsForRemoval: deps.collectProjectWorktreeTaskIdsForRemoval,
@@ -228,7 +228,7 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 		try {
 			const requestUrl = new URL(req.url ?? "/", "http://localhost");
 			const pathname = normalizeRequestPath(requestUrl.pathname);
-			const oauthCallbackResponse = await handleClineMcpOauthCallback(requestUrl);
+			const oauthCallbackResponse = await handleRuntimeMcpOauthCallback(requestUrl);
 			if (oauthCallbackResponse) {
 				res.writeHead(oauthCallbackResponse.statusCode, {
 					"Content-Type": "text/html; charset=utf-8",
@@ -308,11 +308,11 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 		url,
 		close: async () => {
 			await Promise.all(
-				Array.from(clineTaskSessionServiceByWorkspaceId.values()).map(async (service) => {
+				Array.from(taskSessionServiceByWorkspaceId.values()).map(async (service) => {
 					await service.dispose();
 				}),
 			);
-			clineTaskSessionServiceByWorkspaceId.clear();
+			taskSessionServiceByWorkspaceId.clear();
 			await deps.runtimeStateHub.close();
 			await terminalWebSocketBridge.close();
 			await new Promise<void>((resolveClose, rejectClose) => {

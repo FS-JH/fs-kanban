@@ -9,7 +9,6 @@ import {
 } from "@/hooks/app-utils";
 import type { RuntimeAgentId } from "@/runtime/types";
 import { addTaskToColumnWithResult, findCardSelection, updateTask } from "@/state/board-state";
-import { toTelemetrySelectedAgentId, trackTaskCreated } from "@/telemetry/events";
 import type { BoardCard, BoardData, TaskAutoReviewMode, TaskImage } from "@/types";
 import { resolveTaskAutoReviewMode } from "@/types";
 import { useBooleanLocalStorageValue, useRawLocalStorageValue } from "@/utils/react-use";
@@ -20,7 +19,7 @@ interface UseTaskEditorInput {
 	currentProjectId: string | null;
 	createTaskBranchOptions: Array<{ value: string; label: string }>;
 	defaultTaskBranchRef: string;
-	selectedAgentId: RuntimeAgentId | null;
+	selectedAgentId?: RuntimeAgentId | null;
 	setSelectedTaskId: Dispatch<SetStateAction<string | null>>;
 	queueTaskStartAfterEdit?: (taskId: string) => void;
 }
@@ -79,7 +78,7 @@ export function useTaskEditor({
 	currentProjectId,
 	createTaskBranchOptions,
 	defaultTaskBranchRef,
-	selectedAgentId,
+	selectedAgentId: _selectedAgentId,
 	setSelectedTaskId,
 	queueTaskStartAfterEdit,
 }: UseTaskEditorInput): UseTaskEditorResult {
@@ -301,12 +300,6 @@ export function useTaskEditor({
 			baseRef,
 		});
 		setBoard(created.board);
-		trackTaskCreated({
-			selected_agent_id: toTelemetrySelectedAgentId(selectedAgentId),
-			start_in_plan_mode: newTaskStartInPlanMode,
-			...(newTaskAutoReviewEnabled ? { auto_review_mode: newTaskAutoReviewMode } : {}),
-			prompt_character_count: prompt.length,
-		});
 		if (currentProjectId) {
 			setLastCreatedTaskBranchByProjectId((current) => ({
 				...current,
@@ -330,7 +323,6 @@ export function useTaskEditor({
 		newTaskPrompt,
 		newTaskStartInPlanMode,
 		resolvedDefaultTaskBranchRef,
-		selectedAgentId,
 		setBoard,
 	]);
 
@@ -358,14 +350,6 @@ export function useTaskEditor({
 			createdTaskIds.push(created.task.id);
 		}
 		setBoard(updatedBoard);
-		for (const prompt of validPrompts) {
-			trackTaskCreated({
-				selected_agent_id: toTelemetrySelectedAgentId(selectedAgentId),
-				start_in_plan_mode: newTaskStartInPlanMode,
-				...(newTaskAutoReviewEnabled ? { auto_review_mode: newTaskAutoReviewMode } : {}),
-				prompt_character_count: prompt.length,
-			});
-		}
 		if (currentProjectId) {
 			setLastCreatedTaskBranchByProjectId((current) => ({
 				...current,
@@ -388,7 +372,6 @@ export function useTaskEditor({
 		newTaskImages,
 		newTaskStartInPlanMode,
 		resolvedDefaultTaskBranchRef,
-		selectedAgentId,
 		setBoard,
 	]);
 

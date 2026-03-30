@@ -56,8 +56,8 @@ export function DebugDialog({
 					<div className="rounded-md border border-border bg-surface-2 p-3">
 						<p className="text-sm font-medium text-text-primary">Reset all state</p>
 						<p className="mt-1 text-xs text-text-secondary">
-							Clears browser local storage and removes <code>~/.cline/data</code>, <code>~/.cline/kanban</code>,
-							and <code>~/.cline/worktrees</code>. Kanban reloads after completion.
+							Clears browser local storage and removes <code>~/.config/fs-kanban/data</code>, <code>~/.config/fs-kanban</code>,
+							and <code>~/.config/fs-kanban/worktrees</code>. FS Kanban reloads after completion.
 						</p>
 						<Button
 							variant="danger"
@@ -84,8 +84,8 @@ export function DebugDialog({
 				</AlertDialogHeader>
 				<AlertDialogBody>
 					<AlertDialogDescription>
-						This removes local browser storage and deletes <code>~/.cline/data</code>, <code>~/.cline/kanban</code>,
-						and <code>~/.cline/worktrees</code>.
+						This removes local browser storage and deletes <code>~/.config/fs-kanban/data</code>, <code>~/.config/fs-kanban</code>,
+						and <code>~/.config/fs-kanban/worktrees</code>.
 					</AlertDialogDescription>
 					<p className="text-text-primary">This action cannot be undone.</p>
 				</AlertDialogBody>

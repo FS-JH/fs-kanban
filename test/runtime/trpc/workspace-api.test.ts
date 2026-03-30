@@ -98,7 +98,7 @@ describe("createWorkspaceApi loadChanges", () => {
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedClineTaskSessionService: vi.fn(async () => ({ getSummary: vi.fn(() => null) }) as never),
+			getScopedTaskSessionService: vi.fn(async () => ({ getSummary: vi.fn(() => null) }) as never),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
@@ -147,7 +147,7 @@ describe("createWorkspaceApi loadChanges", () => {
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedClineTaskSessionService: vi.fn(async () => ({ getSummary: vi.fn(() => null) }) as never),
+			getScopedTaskSessionService: vi.fn(async () => ({ getSummary: vi.fn(() => null) }) as never),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
@@ -172,11 +172,11 @@ describe("createWorkspaceApi loadChanges", () => {
 		expect(workspaceChangesMocks.getWorkspaceChangesBetweenRefs).not.toHaveBeenCalled();
 	});
 
-	it("uses native cline session checkpoints when terminal summaries are unavailable", async () => {
+	it("uses native session checkpoints when terminal summaries are unavailable", async () => {
 		const terminalManager = {
 			getSummary: vi.fn(() => null),
 		};
-		const clineTaskSessionService = {
+		const taskSessionService = {
 			getSummary: vi.fn(() =>
 				createSummary({
 					state: "awaiting_review",
@@ -198,7 +198,7 @@ describe("createWorkspaceApi loadChanges", () => {
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
@@ -216,7 +216,7 @@ describe("createWorkspaceApi loadChanges", () => {
 			},
 		);
 
-		expect(clineTaskSessionService.getSummary).toHaveBeenCalledWith("task-1");
+		expect(taskSessionService.getSummary).toHaveBeenCalledWith("task-1");
 		expect(workspaceChangesMocks.getWorkspaceChangesBetweenRefs).toHaveBeenCalledWith({
 			cwd: "/tmp/worktree",
 			fromRef: "2222222",
@@ -224,7 +224,7 @@ describe("createWorkspaceApi loadChanges", () => {
 		});
 	});
 
-	it("prefers the newer live cline summary over a stale terminal summary", async () => {
+	it("prefers the newer live summary over a stale terminal summary", async () => {
 		const terminalManager = {
 			getSummary: vi.fn(() =>
 				createSummary({
@@ -246,7 +246,7 @@ describe("createWorkspaceApi loadChanges", () => {
 				}),
 			),
 		};
-		const clineTaskSessionService = {
+		const taskSessionService = {
 			getSummary: vi.fn(() =>
 				createSummary({
 					state: "awaiting_review",
@@ -270,7 +270,7 @@ describe("createWorkspaceApi loadChanges", () => {
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedClineTaskSessionService: vi.fn(async () => clineTaskSessionService as never),
+			getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),

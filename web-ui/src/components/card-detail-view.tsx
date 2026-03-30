@@ -4,15 +4,15 @@ import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AgentTerminalPanel } from "@/components/detail-panels/agent-terminal-panel";
-import { ClineAgentChatPanel, type ClineAgentChatPanelHandle } from "@/components/detail-panels/cline-agent-chat-panel";
+import { AgentChatPanel, type AgentChatPanelHandle } from "@/components/detail-panels/agent-chat-panel";
 import { ColumnContextPanel } from "@/components/detail-panels/column-context-panel";
 import { type DiffLineComment, DiffViewerPanel } from "@/components/detail-panels/diff-viewer-panel";
 import { FileTreePanel } from "@/components/detail-panels/file-tree-panel";
 import { ResizableBottomPane } from "@/components/resizable-bottom-pane";
 import { Button } from "@/components/ui/button";
-import type { ClineChatActionResult } from "@/hooks/use-cline-chat-runtime-actions";
-import type { ClineChatMessage } from "@/hooks/use-cline-chat-session";
-import { isNativeClineAgentSelected } from "@/runtime/native-agent";
+import type { AgentChatActionResult } from "@/hooks/use-agent-chat-runtime-actions";
+import type { AgentChatMessage } from "@/hooks/use-agent-chat-session";
+import { isNativeTaskAgentSelected } from "@/runtime/native-agent";
 import type {
 	RuntimeAgentId,
 	RuntimeConfigResponse,
@@ -213,11 +213,11 @@ export function CardDetailView({
 	moveToTrashLoadingById,
 	onAddReviewComments,
 	onSendReviewComments,
-	onSendClineChatMessage,
-	onCancelClineChatTurn,
-	onLoadClineChatMessages,
-	latestClineChatMessage,
-	streamedClineChatMessages,
+	onSendAgentChatMessage,
+	onCancelAgentChatTurn,
+	onLoadAgentChatMessages,
+	latestAgentChatMessage,
+	streamedAgentChatMessages,
 	onMoveToTrash,
 	isMoveToTrashLoading,
 	gitHistoryPanel,
@@ -235,7 +235,7 @@ export function CardDetailView({
 	isBottomTerminalExpanded,
 	onBottomTerminalToggleExpand,
 	isDocumentVisible = true,
-	onClineSettingsSaved,
+	onAgentSettingsSaved,
 }: {
 	selection: CardSelection;
 	currentProjectId: string | null;
@@ -268,15 +268,15 @@ export function CardDetailView({
 	moveToTrashLoadingById?: Record<string, boolean>;
 	onAddReviewComments?: (taskId: string, text: string) => void;
 	onSendReviewComments?: (taskId: string, text: string) => void;
-	onSendClineChatMessage?: (
+	onSendAgentChatMessage?: (
 		taskId: string,
 		text: string,
 		options?: { mode?: RuntimeTaskSessionMode },
-	) => Promise<ClineChatActionResult>;
-	onCancelClineChatTurn?: (taskId: string) => Promise<{ ok: boolean; message?: string }>;
-	onLoadClineChatMessages?: (taskId: string) => Promise<ClineChatMessage[] | null>;
-	latestClineChatMessage?: ClineChatMessage | null;
-	streamedClineChatMessages?: ClineChatMessage[] | null;
+	) => Promise<AgentChatActionResult>;
+	onCancelAgentChatTurn?: (taskId: string) => Promise<{ ok: boolean; message?: string }>;
+	onLoadAgentChatMessages?: (taskId: string) => Promise<AgentChatMessage[] | null>;
+	latestAgentChatMessage?: AgentChatMessage | null;
+	streamedAgentChatMessages?: AgentChatMessage[] | null;
 	onMoveToTrash: () => void;
 	isMoveToTrashLoading?: boolean;
 	gitHistoryPanel?: ReactNode;
@@ -294,7 +294,7 @@ export function CardDetailView({
 	isBottomTerminalExpanded?: boolean;
 	onBottomTerminalToggleExpand?: () => void;
 	isDocumentVisible?: boolean;
-	onClineSettingsSaved?: () => void;
+	onAgentSettingsSaved?: () => void;
 }): React.ReactElement {
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const [diffComments, setDiffComments] = useState<Map<string, DiffLineComment>>(new Map());
@@ -305,7 +305,7 @@ export function CardDetailView({
 	const resizeDragRef = useRef<{ startX: number; startRatio: number; containerWidth: number } | null>(null);
 	const previousBodyStyleRef = useRef<{ userSelect: string; cursor: string } | null>(null);
 	const mainRowRef = useRef<HTMLDivElement | null>(null);
-	const clineAgentChatPanelRef = useRef<ClineAgentChatPanelHandle | null>(null);
+	const agentChatPanelRef = useRef<AgentChatPanelHandle | null>(null);
 
 	const stopResize = useCallback(() => {
 		setIsResizing(false);
@@ -403,7 +403,7 @@ export function CardDetailView({
 	const fileTreePanelFlex = `0 0 ${isDiffExpanded ? EXPANDED_FILE_TREE_PANEL_BASIS : COLLAPSED_FILE_TREE_PANEL_BASIS}`;
 	const showMoveToTrashActions = selection.column.id === "review" || selection.column.id === "in_progress";
 	const isTaskTerminalEnabled = selection.column.id === "in_progress" || selection.column.id === "review";
-	const showClineAgentChatPanel = isNativeClineAgentSelected(sessionSummary?.agentId ?? selectedAgentId);
+	const showAgentChatPanel = isNativeTaskAgentSelected(sessionSummary?.agentId ?? selectedAgentId);
 	const availablePaths = useMemo(() => {
 		if (!runtimeFiles || runtimeFiles.length === 0) {
 			return [];
@@ -499,27 +499,27 @@ export function CardDetailView({
 
 	const handleAddDiffComments = useCallback(
 		(formatted: string) => {
-			if (showClineAgentChatPanel) {
-				clineAgentChatPanelRef.current?.appendToDraft(formatted);
+			if (showAgentChatPanel) {
+				agentChatPanelRef.current?.appendToDraft(formatted);
 				setIsDiffExpanded(false);
 				return;
 			}
 			onAddReviewComments?.(selection.card.id, formatted);
 		},
-		[onAddReviewComments, selection.card.id, showClineAgentChatPanel],
+		[onAddReviewComments, selection.card.id, showAgentChatPanel],
 	);
 
 	const handleSendDiffComments = useCallback(
 		(formatted: string) => {
-			if (showClineAgentChatPanel) {
-				void clineAgentChatPanelRef.current?.sendText(formatted);
+			if (showAgentChatPanel) {
+				void agentChatPanelRef.current?.sendText(formatted);
 				setIsDiffExpanded(false);
 				return;
 			}
 			onSendReviewComments?.(selection.card.id, formatted);
 			setIsDiffExpanded(false);
 		},
-		[onSendReviewComments, selection.card.id, showClineAgentChatPanel],
+		[onSendReviewComments, selection.card.id, showAgentChatPanel],
 	);
 
 	return (
@@ -573,21 +573,21 @@ export function CardDetailView({
 							<div
 								style={{ display: isDiffExpanded ? "none" : "flex", width: agentPanelPercent, minWidth: 0, minHeight: 0 }}
 							>
-									{showClineAgentChatPanel ? (
-										<ClineAgentChatPanel
-											ref={clineAgentChatPanelRef}
+									{showAgentChatPanel ? (
+										<AgentChatPanel
+											ref={agentChatPanelRef}
 											taskId={selection.card.id}
 											summary={sessionSummary}
 														taskColumnId={selection.column.id}
 											defaultMode={selection.card.startInPlanMode ? "plan" : "act"}
 											workspaceId={currentProjectId}
 											runtimeConfig={runtimeConfig}
-											onClineSettingsSaved={onClineSettingsSaved}
-											onSendMessage={onSendClineChatMessage}
-											onCancelTurn={onCancelClineChatTurn}
-											onLoadMessages={onLoadClineChatMessages}
-											incomingMessages={streamedClineChatMessages}
-											incomingMessage={latestClineChatMessage}
+											onAgentSettingsSaved={onAgentSettingsSaved}
+											onSendMessage={onSendAgentChatMessage}
+											onCancelTurn={onCancelAgentChatTurn}
+											onLoadMessages={onLoadAgentChatMessages}
+											incomingMessages={streamedAgentChatMessages}
+											incomingMessage={latestAgentChatMessage}
 											onCommit={onAgentCommitTask ? () => onAgentCommitTask(selection.card.id) : undefined}
 											onOpenPr={onAgentOpenPrTask ? () => onAgentOpenPrTask(selection.card.id) : undefined}
 											isCommitLoading={agentCommitTaskLoadingById?.[selection.card.id] ?? false}
@@ -694,8 +694,8 @@ export function CardDetailView({
 												selectedPath={selectedPath}
 												onSelectedPathChange={setSelectedPath}
 												viewMode={isDiffExpanded ? "split" : "unified"}
-												onAddToTerminal={onAddReviewComments || showClineAgentChatPanel ? handleAddDiffComments : undefined}
-											onSendToTerminal={onSendReviewComments || showClineAgentChatPanel ? handleSendDiffComments : undefined}
+												onAddToTerminal={onAddReviewComments || showAgentChatPanel ? handleAddDiffComments : undefined}
+											onSendToTerminal={onSendReviewComments || showAgentChatPanel ? handleSendDiffComments : undefined}
 											comments={diffComments}
 												onCommentsChange={setDiffComments}
 											/>

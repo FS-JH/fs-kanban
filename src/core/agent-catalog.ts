@@ -11,14 +11,6 @@ export interface RuntimeAgentCatalogEntry {
 
 export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 	{
-		id: "claude",
-		label: "Claude Code",
-		binary: "claude",
-		baseArgs: [],
-		autonomousArgs: ["--dangerously-skip-permissions"],
-		installUrl: "https://docs.anthropic.com/en/docs/claude-code/quickstart",
-	},
-	{
 		id: "codex",
 		label: "OpenAI Codex",
 		binary: "codex",
@@ -27,49 +19,16 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 		installUrl: "https://github.com/openai/codex",
 	},
 	{
-		id: "cline",
-		label: "Cline",
-		binary: "cline",
+		id: "claude",
+		label: "Claude Code",
+		binary: "claude",
 		baseArgs: [],
-		autonomousArgs: ["--auto-approve-all"],
-		installUrl: "https://github.com/cline/cline",
-	},
-	{
-		id: "opencode",
-		label: "OpenCode",
-		binary: "opencode",
-		baseArgs: [],
-		autonomousArgs: [],
-		installUrl: "https://github.com/sst/opencode",
-	},
-	{
-		id: "droid",
-		label: "Droid CLI",
-		binary: "droid",
-		baseArgs: [],
-		autonomousArgs: ["--auto", "high"],
-		installUrl: "https://docs.factory.ai/cli/getting-started/quickstart",
-	},
-	{
-		id: "gemini",
-		label: "Gemini CLI",
-		binary: "gemini",
-		baseArgs: [],
-		autonomousArgs: ["--yolo"],
-		installUrl: "https://github.com/google-gemini/gemini-cli",
+		autonomousArgs: ["--dangerously-skip-permissions"],
+		installUrl: "https://docs.anthropic.com/en/docs/claude-code/quickstart",
 	},
 ];
 
-// Temporarily keep launch support scoped to the core agent set.
-// Re-enable additional CLIs by uncommenting entries below when ready.
-export const RUNTIME_LAUNCH_SUPPORTED_AGENT_IDS: readonly RuntimeAgentId[] = [
-	"cline",
-	"claude",
-	"codex",
-	// "opencode",
-	// "droid",
-	// "gemini",
-];
+export const RUNTIME_LAUNCH_SUPPORTED_AGENT_IDS: readonly RuntimeAgentId[] = ["codex", "claude"];
 
 const RUNTIME_LAUNCH_SUPPORTED_AGENT_ID_SET = new Set<RuntimeAgentId>(RUNTIME_LAUNCH_SUPPORTED_AGENT_IDS);
 

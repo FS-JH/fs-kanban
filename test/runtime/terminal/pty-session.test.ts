@@ -100,7 +100,7 @@ describe("PtySession", () => {
 		ptyMocks.spawn.mockReturnValue(ptyProcess);
 
 		PtySession.spawn({
-			binary: "cline",
+			binary: "codex",
 			args: [],
 			cwd: "C:/repo",
 			cols: 120,
@@ -108,7 +108,7 @@ describe("PtySession", () => {
 		});
 
 		expect(ptyMocks.spawn).toHaveBeenCalledTimes(1);
-		expect(ptyMocks.spawn.mock.calls[0]?.[1]).toBe('/d /s /c "cline"');
+		expect(ptyMocks.spawn.mock.calls[0]?.[1]).toBe('/d /s /c "codex"');
 	});
 
 	it("preserves full prompt text on Windows", () => {
@@ -118,7 +118,7 @@ describe("PtySession", () => {
 		ptyMocks.spawn.mockReturnValue(ptyProcess);
 
 		PtySession.spawn({
-			binary: "cline",
+			binary: "codex",
 			args: ["add comment to random file\nwith more context"],
 			cwd: "C:/repo",
 			cols: 120,
@@ -127,7 +127,7 @@ describe("PtySession", () => {
 
 		expect(ptyMocks.spawn).toHaveBeenCalledTimes(1);
 		const cmdArgs = ptyMocks.spawn.mock.calls[0]?.[1] as string;
-		expect(cmdArgs).toContain("cline");
+		expect(cmdArgs).toContain("codex");
 		expect(cmdArgs).toContain("add^");
 		expect(cmdArgs).toContain("comment^");
 		expect(cmdArgs).toContain("random^");

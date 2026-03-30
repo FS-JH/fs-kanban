@@ -1,15 +1,11 @@
 import { realpathSync } from "node:fs";
 
-import packageJson from "../../package.json" with { type: "json" };
-
 import type { RuntimeAgentId } from "../core/api-contract.js";
 import { resolveKanbanCommandParts } from "../core/kanban-command.js";
 import { buildShellCommandLine } from "../core/shell.js";
 import { isHomeAgentSessionId } from "../core/home-agent-session.js";
-import { AutoUpdatePackageManager, detectAutoUpdateInstallation } from "../update/auto-update.js";
 
-const DEFAULT_COMMAND_PREFIX = "kanban";
-const KANBAN_VERSION = typeof packageJson.version === "string" ? packageJson.version : "0.1.0";
+const DEFAULT_COMMAND_PREFIX = "fs-kanban";
 
 export interface ResolveAppendSystemPromptCommandPrefixOptions {
 	currentVersion?: string;
@@ -27,7 +23,6 @@ export interface RenderAppendSystemPromptOptions {
 const APPEND_PROMPT_AGENT_IDS: readonly RuntimeAgentId[] = [
 	"claude",
 	"codex",
-	"cline",
 	"droid",
 	"gemini",
 	"opencode",
@@ -51,8 +46,6 @@ function resolveHomeAgentId(taskId: string): RuntimeAgentId | null {
 
 function renderLinearSetupGuidanceForAgent(agentId: RuntimeAgentId | null): string {
 	switch (agentId) {
-		case "cline":
-			return "- If Linear MCP is not available in the current agent (Cline), open MCP settings in the app, add server name `linear`, URL `https://mcp.linear.app/mcp`, transport `http`, then complete OAuth.";
 		case "claude":
 			return "- If Linear MCP is not available in the current agent (Claude Code), run: `claude mcp add --transport http --scope user linear https://mcp.linear.app/mcp`";
 		case "codex":
@@ -87,37 +80,11 @@ export function resolveAppendSystemPromptCommandPrefix(
 	}
 
 	const resolveRealPath = options.resolveRealPath ?? realpathSync;
-	let entrypointPath: string;
 	try {
-		entrypointPath = resolveRealPath(entrypointArg);
+		resolveRealPath(entrypointArg);
 	} catch {
 		return fallbackCommandPrefix;
 	}
-
-	const installation = detectAutoUpdateInstallation({
-		currentVersion: options.currentVersion ?? KANBAN_VERSION,
-		packageName: "kanban",
-		entrypointPath,
-		cwd: options.cwd ?? process.cwd(),
-	});
-
-	if (installation.updateTiming !== "shutdown") {
-		return fallbackCommandPrefix;
-	}
-
-	if (installation.packageManager === AutoUpdatePackageManager.NPX) {
-		return "npx -y kanban";
-	}
-	if (installation.packageManager === AutoUpdatePackageManager.PNPM) {
-		return "pnpm dlx kanban";
-	}
-	if (installation.packageManager === AutoUpdatePackageManager.YARN) {
-		return "yarn dlx kanban";
-	}
-	if (installation.packageManager === AutoUpdatePackageManager.BUN) {
-		return "bun x kanban";
-	}
-
 	return fallbackCommandPrefix;
 }
 
@@ -127,13 +94,13 @@ export function renderAppendSystemPrompt(
 ): string {
 	const kanbanCommand = commandPrefix.trim() || DEFAULT_COMMAND_PREFIX;
 	const selectedAgentId = options.agentId ?? null;
-	return `# Kanban Sidebar
+	return `# FS Kanban Sidebar
 
-You are the Kanban sidebar agent for this workspace. Help the user interact with their Kanban board directly from this side panel. When the user asks to add tasks, create tasks, break work down, link tasks, or start tasks, prefer using the Kanban CLI yourself instead of describing manual steps.
+You are the FS Kanban sidebar agent for this workspace. Help the user interact with their board directly from this side panel. When the user asks to add tasks, create tasks, break work down, link tasks, or start tasks, prefer using the FS Kanban CLI yourself instead of describing manual steps.
 
-Kanban is a CLI tool for orchestrating multiple coding agents working on tasks in parallel on a kanban board. It manages git worktrees automatically so that each task can run a dedicated CLI agent in its own worktree.
+FS Kanban is a CLI tool for orchestrating multiple coding agents working on tasks in parallel on a kanban board. It manages git worktrees automatically so that each task can run a dedicated CLI agent in its own worktree.
 
-You are a Kanban board management helper: your job is to create, organize, link, start, and manage tasks using the Kanban CLI.
+You are a board management helper: your job is to create, organize, link, start, and manage tasks using the FS Kanban CLI.
 
 # CRITICAL: You are NOT a coding agent
 
@@ -144,12 +111,12 @@ If the user asks you to write code, fix a bug, implement a feature, refactor, or
 - If the user asks to add tasks to kb, ask kb, kanban, or says add tasks without other context, they likely want to add tasks in Kanban. This includes phrases like "create tasks", "make 3 tasks", "add a task", "break down into tasks", "split into tasks", "decompose into tasks", and "turn into tasks".
 - Kanban also supports linking tasks. Linking is useful both for parallelization and for dependencies: when work is easy to decompose into multiple pieces that can be done in parallel, link multiple backlog tasks to the same dependency so they all become ready to start once that dependency finishes; when one piece of work depends on another, use links to represent that follow-on dependency. If both linked tasks are in backlog, Kanban preserves the order you pass to the command: \`--task-id\` waits on \`--linked-task-id\`, and on the board the arrow points into \`--linked-task-id\`. Once only one linked task remains in backlog, Kanban reorients the saved dependency so the backlog task is the waiting dependent task and the other task is the prerequisite. The board arrow points into the prerequisite task so the user can see what must finish first. A link requires at least one backlog task, and when the linked review task is moved to trash, that backlog task becomes ready to start.
 - Tasks can also enable automatic review actions: auto-commit, auto-open-pr, or auto-move-to-trash once completed, sending the task to trash and kicking off any linked tasks.
-- If your current working directory is inside \`.cline/worktrees/\`, you are inside a Kanban task worktree. In that case, create or manage tasks against the main workspace path, not the task worktree path. Pass the main workspace with \`--project-path\`.
-- If a task command fails because the runtime is unavailable, tell the user to start Kanban in that workspace first with \`${kanbanCommand}\`, then retry the task command.
+- If your current working directory is inside \`.fs-kanban/worktrees/\`, you are inside a task worktree. In that case, create or manage tasks against the main workspace path, not the task worktree path. Pass the main workspace with \`--project-path\`.
+- If a task command fails because the runtime is unavailable, tell the user to start FS Kanban in that workspace first with \`${kanbanCommand}\`, then retry the task command.
 
 # Command Prefix
 
-Use this prefix for every Kanban command in this session:
+Use this prefix for every FS Kanban command in this session:
 \`${kanbanCommand}\`
 
 # Tool Invocation Notes
@@ -178,7 +145,7 @@ All commands return JSON.
 
 ## task list
 
-Purpose: list Kanban tasks for a workspace, including auto-review settings and dependency links.
+Purpose: list tasks for a workspace, including auto-review settings and dependency links.
 
 Command:
 \`${kanbanCommand} task list [--project-path <path>] [--column backlog|in_progress|review|trash]\`

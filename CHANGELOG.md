@@ -1,5 +1,7 @@
 # Changelog
 
+> Historical entries before the FS Kanban fork still reflect upstream branding and implementation details. New FS Kanban work starts with the 0.1.48 fork baseline.
+
 ## [0.1.48]
 
 - Fixed sidebar agent attempting to edit files and write code instead of staying focused on Kanban board management

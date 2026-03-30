@@ -69,14 +69,13 @@ function getCuratedDefinitions(runtimeConfig: RuntimeConfigState, detected: stri
 	return getRuntimeLaunchSupportedAgentCatalog().map((entry) => {
 		const defaultArgs = getDefaultArgs(entry.id);
 		const command = joinCommand(entry.binary, defaultArgs);
-		const isInstalled = entry.id === "cline" ? true : detectedSet.has(entry.binary);
 		return {
 			id: entry.id,
 			label: entry.label,
 			binary: entry.binary,
 			command,
 			defaultArgs,
-			installed: isInstalled,
+			installed: detectedSet.has(entry.binary),
 			configured: runtimeConfig.selectedAgentId === entry.id,
 		};
 	});

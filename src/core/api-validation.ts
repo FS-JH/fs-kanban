@@ -308,7 +308,7 @@ export function parseTaskChatCancelRequest(value: unknown): RuntimeTaskChatCance
 	};
 }
 
-export function parseClineProviderModelsRequest(value: unknown): RuntimeClineProviderModelsRequest {
+export function parseProviderModelsRequest(value: unknown): RuntimeClineProviderModelsRequest {
 	const parsed = parseWithSchema(runtimeClineProviderModelsRequestSchema, value);
 	const providerId = parsed.providerId.trim();
 	if (!providerId) {
@@ -319,7 +319,7 @@ export function parseClineProviderModelsRequest(value: unknown): RuntimeClinePro
 	};
 }
 
-export function parseClineProviderSettingsSaveRequest(value: unknown): RuntimeClineProviderSettingsSaveRequest {
+export function parseProviderSettingsSaveRequest(value: unknown): RuntimeClineProviderSettingsSaveRequest {
 	const parsed = parseWithSchema(runtimeClineProviderSettingsSaveRequestSchema, value);
 	const providerId = parsed.providerId.trim();
 	if (!providerId) {
@@ -331,7 +331,7 @@ export function parseClineProviderSettingsSaveRequest(value: unknown): RuntimeCl
 	};
 }
 
-export function parseClineMcpSettingsSaveRequest(value: unknown): RuntimeClineMcpSettingsSaveRequest {
+export function parseMcpSettingsSaveRequest(value: unknown): RuntimeClineMcpSettingsSaveRequest {
 	const parsed = parseWithSchema(runtimeClineMcpSettingsSaveRequestSchema, value);
 	const normalizedServers = parsed.servers.map((server) => {
 		const name = server.name.trim();
@@ -400,7 +400,7 @@ export function parseClineMcpSettingsSaveRequest(value: unknown): RuntimeClineMc
 	};
 }
 
-export function parseClineMcpOAuthRequest(value: unknown): RuntimeClineMcpOAuthRequest {
+export function parseMcpOAuthRequest(value: unknown): RuntimeClineMcpOAuthRequest {
 	const parsed = parseWithSchema(runtimeClineMcpOAuthRequestSchema, value);
 	const serverName = parsed.serverName.trim();
 	if (!serverName) {
@@ -411,13 +411,19 @@ export function parseClineMcpOAuthRequest(value: unknown): RuntimeClineMcpOAuthR
 	};
 }
 
-export function parseClineOauthLoginRequest(value: unknown): RuntimeClineOauthLoginRequest {
+export function parseOauthLoginRequest(value: unknown): RuntimeClineOauthLoginRequest {
 	const parsed = parseWithSchema(runtimeClineOauthLoginRequestSchema, value);
 	return {
 		...parsed,
 		baseUrl: typeof parsed.baseUrl === "string" ? parsed.baseUrl.trim() || null : parsed.baseUrl,
 	};
 }
+
+export { parseProviderModelsRequest as parseClineProviderModelsRequest };
+export { parseProviderSettingsSaveRequest as parseClineProviderSettingsSaveRequest };
+export { parseMcpSettingsSaveRequest as parseClineMcpSettingsSaveRequest };
+export { parseMcpOAuthRequest as parseClineMcpOAuthRequest };
+export { parseOauthLoginRequest as parseClineOauthLoginRequest };
 
 export function parseShellSessionStartRequest(value: unknown): RuntimeShellSessionStartRequest {
 	const parsed = parseWithSchema(runtimeShellSessionStartRequestSchema, value);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { fetchClineKanbanAccess } from "@/runtime/runtime-config-query";
+import { fetchAgentKanbanAccess } from "@/runtime/runtime-config-query";
 
 interface UseKanbanAccessGateInput {
 	workspaceId: string | null;
@@ -12,7 +12,7 @@ export function useKanbanAccessGate(input: UseKanbanAccessGateInput): { isBlocke
 
 	useEffect(() => {	
 		let cancelled = false;
-		void fetchClineKanbanAccess(workspaceId)
+		void fetchAgentKanbanAccess(workspaceId)
 			.then((response) => {
 				console.log(response)
 				if (cancelled) {

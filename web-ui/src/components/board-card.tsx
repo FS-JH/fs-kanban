@@ -4,7 +4,7 @@ import { AlertCircle, GitBranch, Play, RotateCcw, Trash2 } from "lucide-react";
 import type { MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { formatClineToolCallLabel } from "@runtime-cline-tool-call-display";
+import { formatClineToolCallLabel as formatToolCallLabel } from "@runtime-cline-tool-call-display";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";
@@ -102,7 +102,7 @@ function resolveToolCallLabel(
 	toolInputSummary: string | null,
 ): string | null {
 	if (toolName) {
-		return formatClineToolCallLabel(toolName, toolInputSummary ?? extractToolInputSummaryFromActivityText(activityText ?? "", toolName));
+		return formatToolCallLabel(toolName, toolInputSummary ?? extractToolInputSummaryFromActivityText(activityText ?? "", toolName));
 	}
 	if (!activityText) {
 		return null;
@@ -111,7 +111,7 @@ function resolveToolCallLabel(
 	if (!parsed) {
 		return null;
 	}
-	return formatClineToolCallLabel(parsed.toolName, parsed.toolInputSummary);
+	return formatToolCallLabel(parsed.toolName, parsed.toolInputSummary);
 }
 
 function getCardSessionActivity(summary: RuntimeTaskSessionSummary | undefined): CardSessionActivity | null {
@@ -122,7 +122,6 @@ function getCardSessionActivity(summary: RuntimeTaskSessionSummary | undefined):
 	const activityText = hookActivity?.activityText?.trim();
 	const toolName = hookActivity?.toolName?.trim() ?? null;
 	const toolInputSummary = hookActivity?.toolInputSummary?.trim() ?? null;
-	const source = hookActivity?.source?.trim() ?? null;
 	const finalMessage = hookActivity?.finalMessage?.trim();
 	const hookEventName = hookActivity?.hookEventName?.trim() ?? null;
 	if (summary.state === "awaiting_review" && finalMessage) {

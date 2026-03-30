@@ -1,4 +1,4 @@
-# Kanban release workflow
+# FS Kanban Release Workflow
 
 ## Overview
 
@@ -45,6 +45,8 @@ git push origin v0.2.0
 
 Pushing the tag does not publish automatically.
 
+Before pushing a release tag, verify that `origin` points at the FS Kanban repository you actually intend to publish from. This checkout was forked from upstream, so leaving the upstream project configured as `origin` is an easy way to ship the wrong repo metadata or push tags to the wrong remote.
+
 ## Manual publish in GitHub UI
 
 1. Open Actions in GitHub.
@@ -62,7 +64,7 @@ Given the input tag, the workflow:
 3. Validates tag format (`vX.Y.Z` with optional prerelease suffix).
 4. Runs the reusable test workflow (`test.yml`).
 5. Verifies `tag == v${package.json version}`.
-6. Runs `npm run prepublishOnly`.
+6. Runs `npm run prepublishOnly`, which now delegates to `npm run release:verify` so the publish path always includes the root checks, the production build, and the web UI test suite.
    - This runs build + checks before publish.
 7. Publishes with:
 

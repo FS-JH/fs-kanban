@@ -104,7 +104,6 @@ export default function App(): ReactElement {
 		latestTaskChatMessage,
 		taskChatMessagesByTaskId,
 		latestTaskReadyForReview,
-		latestMcpAuthStatuses,
 		clineSessionContextVersion,
 		streamError,
 		isRuntimeDisconnected,
@@ -146,7 +145,7 @@ export default function App(): ReactElement {
 		handleOpenStartupOnboardingDialog,
 		handleCloseStartupOnboardingDialog,
 		handleSelectOnboardingAgent,
-		handleOnboardingClineSetupSaved,
+		handleOnboardingAgentSetupSaved,
 	} = useStartupOnboarding({
 		currentProjectId,
 		runtimeProjectConfig,
@@ -840,7 +839,7 @@ export default function App(): ReactElement {
 									<FolderOpen size={48} strokeWidth={1} />
 									<h3 className="text-sm font-semibold text-text-primary">No projects yet</h3>
 									<p className="text-[13px] text-text-secondary">
-										Add a git repository to start using Kanban.
+										Add a git repository to start using FS Kanban.
 									</p>
 									<Button
 										variant="primary"
@@ -980,11 +979,11 @@ export default function App(): ReactElement {
 								onSendReviewComments={(taskId: string, text: string) => {
 									void handleSendReviewComments(taskId, text);
 								}}
-								onSendClineChatMessage={sendTaskChatMessage}
-								onCancelClineChatTurn={cancelTaskChatTurn}
-								onLoadClineChatMessages={fetchTaskChatMessages}
-								latestClineChatMessage={latestSelectedTaskChatMessage}
-								streamedClineChatMessages={selectedTaskChatMessages}
+								onSendAgentChatMessage={sendTaskChatMessage}
+								onCancelAgentChatTurn={cancelTaskChatTurn}
+								onLoadAgentChatMessages={fetchTaskChatMessages}
+								latestAgentChatMessage={latestSelectedTaskChatMessage}
+								streamedAgentChatMessages={selectedTaskChatMessages}
 								onMoveToTrash={handleMoveToTrash}
 								isMoveToTrashLoading={moveToTrashLoadingById[selectedCard.card.id] ?? false}
 								gitHistoryPanel={
@@ -1006,7 +1005,7 @@ export default function App(): ReactElement {
 								isBottomTerminalExpanded={isDetailTerminalExpanded}
 								onBottomTerminalToggleExpand={handleToggleExpandDetailTerminal}
 								isDocumentVisible={isDocumentVisible}
-								onClineSettingsSaved={refreshRuntimeProjectConfig}
+								onAgentSettingsSaved={refreshRuntimeProjectConfig}
 							/>
 						</div>
 					) : null}
@@ -1016,7 +1015,6 @@ export default function App(): ReactElement {
 				open={isSettingsOpen}
 				workspaceId={settingsWorkspaceId}
 				initialConfig={settingsRuntimeProjectConfig}
-				liveMcpAuthStatuses={latestMcpAuthStatuses}
 				initialSection={settingsInitialSection}
 				onOpenChange={(nextOpen) => {
 					setIsSettingsOpen(nextOpen);
@@ -1071,11 +1069,11 @@ export default function App(): ReactElement {
 				onClose={handleCloseStartupOnboardingDialog}
 				selectedAgentId={runtimeProjectConfig?.selectedAgentId ?? null}
 				agents={runtimeProjectConfig?.agents ?? []}
-				clineProviderSettings={runtimeProjectConfig?.clineProviderSettings ?? null}
+				agentProviderSettings={runtimeProjectConfig?.clineProviderSettings ?? null}
 				workspaceId={currentProjectId}
 				runtimeConfig={runtimeProjectConfig ?? null}
 				onSelectAgent={handleSelectOnboardingAgent}
-				onClineSetupSaved={handleOnboardingClineSetupSaved}
+				onAgentSetupSaved={handleOnboardingAgentSetupSaved}
 			/>
 
 			<AlertDialog
@@ -1092,7 +1090,7 @@ export default function App(): ReactElement {
 				<AlertDialogBody>
 					<AlertDialogDescription asChild>
 						<div className="flex flex-col gap-3">
-							<p>Cline requires git to manage worktrees for tasks. This folder is not a git repository yet.</p>
+							<p>FS Kanban requires git to manage worktrees for tasks. This folder is not a git repository yet.</p>
 							{pendingGitInitializationPath ? (
 								<p className="font-mono text-xs text-text-secondary break-all">
 									{pendingGitInitializationPath}

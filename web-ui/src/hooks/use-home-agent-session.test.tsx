@@ -119,7 +119,7 @@ function createRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): Ru
 }
 
 function createLegacyRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): RuntimeConfigResponse {
-	const { clineProviderSettings: _clineProviderSettings, ...legacyConfig } = createRuntimeConfig(overrides);
+	const { clineProviderSettings: _agentProviderSettings, ...legacyConfig } = createRuntimeConfig(overrides);
 	return legacyConfig as RuntimeConfigResponse;
 }
 
@@ -405,7 +405,7 @@ describe("useHomeAgentSession", () => {
 		expect(startTaskSessionMutateMock).not.toHaveBeenCalled();
 	});
 
-	it("reloads the home cline chat session when the Cline session context version changes", async () => {
+	it("reloads the home cline chat session when the Agent session context version changes", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		await act(async () => {

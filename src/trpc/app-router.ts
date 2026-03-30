@@ -170,7 +170,7 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope | null,
 			input: RuntimeConfigSaveRequest,
 		) => Promise<RuntimeConfigResponse>;
-		saveClineProviderSettings: (
+		saveProviderSettings: (
 			scope: RuntimeTrpcWorkspaceScope | null,
 			input: RuntimeClineProviderSettingsSaveRequest,
 		) => Promise<RuntimeClineProviderSettingsSaveResponse>;
@@ -190,7 +190,7 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskChatMessagesRequest,
 		) => Promise<RuntimeTaskChatMessagesResponse>;
-		getClineSlashCommands: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeSlashCommandsResponse>;
+		getSlashCommands: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeSlashCommandsResponse>;
 		sendTaskChatMessage: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskChatSendRequest,
@@ -207,30 +207,30 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskChatCancelRequest,
 		) => Promise<RuntimeTaskChatCancelResponse>;
-		getClineProviderCatalog: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineProviderCatalogResponse>;
-		getClineAccountProfile: (
+		getProviderCatalog: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineProviderCatalogResponse>;
+		getAccountProfile: (
 			scope: RuntimeTrpcWorkspaceScope | null,
 		) => Promise<RuntimeClineAccountProfileResponse>;
-		getClineKanbanAccess: (
+		getKanbanAccess: (
 			scope: RuntimeTrpcWorkspaceScope | null,
 		) => Promise<RuntimeClineKanbanAccessResponse>;
-		getClineProviderModels: (
+		getProviderModels: (
 			scope: RuntimeTrpcWorkspaceScope | null,
 			input: RuntimeClineProviderModelsRequest,
 		) => Promise<RuntimeClineProviderModelsResponse>;
-		runClineProviderOAuthLogin: (
+		runProviderOAuthLogin: (
 			scope: RuntimeTrpcWorkspaceScope | null,
 			input: RuntimeClineOauthLoginRequest,
 		) => Promise<RuntimeClineOauthLoginResponse>;
-		getClineMcpAuthStatuses: (
+		getMcpAuthStatuses: (
 			scope: RuntimeTrpcWorkspaceScope | null,
 		) => Promise<RuntimeClineMcpAuthStatusResponse>;
-		runClineMcpServerOAuth: (
+		runMcpServerOAuth: (
 			scope: RuntimeTrpcWorkspaceScope | null,
 			input: RuntimeClineMcpOAuthRequest,
 		) => Promise<RuntimeClineMcpOAuthResponse>;
-		getClineMcpSettings: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineMcpSettingsResponse>;
-		saveClineMcpSettings: (
+		getMcpSettings: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineMcpSettingsResponse>;
+		saveMcpSettings: (
 			scope: RuntimeTrpcWorkspaceScope | null,
 			input: RuntimeClineMcpSettingsSaveRequest,
 		) => Promise<RuntimeClineMcpSettingsSaveResponse>;
@@ -383,11 +383,11 @@ export const runtimeAppRouter = t.router({
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.saveConfig(ctx.workspaceScope, input);
 			}),
-		saveClineProviderSettings: t.procedure
+		saveProviderSettings: t.procedure
 			.input(runtimeClineProviderSettingsSaveRequestSchema)
 			.output(runtimeClineProviderSettingsSaveResponseSchema)
 			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.saveClineProviderSettings(ctx.workspaceScope, input);
+				return await ctx.runtimeApi.saveProviderSettings(ctx.workspaceScope, input);
 			}),
 		startTaskSession: workspaceProcedure
 			.input(runtimeTaskSessionStartRequestSchema)
@@ -413,8 +413,8 @@ export const runtimeAppRouter = t.router({
 			.query(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.getTaskChatMessages(ctx.workspaceScope, input);
 			}),
-		getClineSlashCommands: t.procedure.output(runtimeSlashCommandsResponseSchema).query(async ({ ctx }) => {
-			return await ctx.runtimeApi.getClineSlashCommands(ctx.workspaceScope);
+		getSlashCommands: t.procedure.output(runtimeSlashCommandsResponseSchema).query(async ({ ctx }) => {
+			return await ctx.runtimeApi.getSlashCommands(ctx.workspaceScope);
 		}),
 		reloadTaskChatSession: workspaceProcedure
 			.input(runtimeTaskChatReloadRequestSchema)
@@ -440,54 +440,54 @@ export const runtimeAppRouter = t.router({
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.cancelTaskChatTurn(ctx.workspaceScope, input);
 			}),
-		getClineProviderCatalog: t.procedure
+		getProviderCatalog: t.procedure
 			.output(runtimeClineProviderCatalogResponseSchema)
 			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getClineProviderCatalog(ctx.workspaceScope);
+				return await ctx.runtimeApi.getProviderCatalog(ctx.workspaceScope);
 			}),
-		getClineAccountProfile: t.procedure
+		getAccountProfile: t.procedure
 			.output(runtimeClineAccountProfileResponseSchema)
 			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getClineAccountProfile(ctx.workspaceScope);
+				return await ctx.runtimeApi.getAccountProfile(ctx.workspaceScope);
 			}),
-		getClineKanbanAccess: t.procedure
+		getKanbanAccess: t.procedure
 			.output(runtimeClineKanbanAccessResponseSchema)
 			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getClineKanbanAccess(ctx.workspaceScope);
+				return await ctx.runtimeApi.getKanbanAccess(ctx.workspaceScope);
 			}),
-		getClineProviderModels: t.procedure
+		getProviderModels: t.procedure
 			.input(runtimeClineProviderModelsRequestSchema)
 			.output(runtimeClineProviderModelsResponseSchema)
 			.query(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.getClineProviderModels(ctx.workspaceScope, input);
+				return await ctx.runtimeApi.getProviderModels(ctx.workspaceScope, input);
 			}),
-		getClineMcpAuthStatuses: t.procedure
+		getMcpAuthStatuses: t.procedure
 			.output(runtimeClineMcpAuthStatusResponseSchema)
 			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getClineMcpAuthStatuses(ctx.workspaceScope);
+				return await ctx.runtimeApi.getMcpAuthStatuses(ctx.workspaceScope);
 			}),
-		runClineMcpServerOAuth: t.procedure
+		runMcpServerOAuth: t.procedure
 			.input(runtimeClineMcpOAuthRequestSchema)
 			.output(runtimeClineMcpOAuthResponseSchema)
 			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.runClineMcpServerOAuth(ctx.workspaceScope, input);
+				return await ctx.runtimeApi.runMcpServerOAuth(ctx.workspaceScope, input);
 			}),
-		getClineMcpSettings: t.procedure
+		getMcpSettings: t.procedure
 			.output(runtimeClineMcpSettingsResponseSchema)
 			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getClineMcpSettings(ctx.workspaceScope);
+				return await ctx.runtimeApi.getMcpSettings(ctx.workspaceScope);
 			}),
-		saveClineMcpSettings: t.procedure
+		saveMcpSettings: t.procedure
 			.input(runtimeClineMcpSettingsSaveRequestSchema)
 			.output(runtimeClineMcpSettingsSaveResponseSchema)
 			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.saveClineMcpSettings(ctx.workspaceScope, input);
+				return await ctx.runtimeApi.saveMcpSettings(ctx.workspaceScope, input);
 			}),
-		runClineProviderOAuthLogin: t.procedure
+		runProviderOAuthLogin: t.procedure
 			.input(runtimeClineOauthLoginRequestSchema)
 			.output(runtimeClineOauthLoginResponseSchema)
 			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.runClineProviderOAuthLogin(ctx.workspaceScope, input);
+				return await ctx.runtimeApi.runProviderOAuthLogin(ctx.workspaceScope, input);
 			}),
 		startShellSession: workspaceProcedure
 			.input(runtimeShellSessionStartRequestSchema)

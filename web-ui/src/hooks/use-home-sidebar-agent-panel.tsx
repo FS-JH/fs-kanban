@@ -5,11 +5,11 @@ import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentTerminalPanel } from "@/components/detail-panels/agent-terminal-panel";
-import { ClineAgentChatPanel } from "@/components/detail-panels/cline-agent-chat-panel";
+import { AgentChatPanel } from "@/components/detail-panels/agent-chat-panel";
 import { Spinner } from "@/components/ui/spinner";
 import { selectNewestTaskSessionSummary } from "@/hooks/home-sidebar-agent-panel-session-summary";
 import { createIdleTaskSession } from "@/hooks/app-utils";
-import { useClineChatRuntimeActions } from "@/hooks/use-cline-chat-runtime-actions";
+import { useAgentChatRuntimeActions } from "@/hooks/use-agent-chat-runtime-actions";
 import { useHomeAgentSession } from "@/hooks/use-home-agent-session";
 import { selectLatestTaskChatMessageForTask } from "@/runtime/native-agent";
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
@@ -95,7 +95,7 @@ export function useHomeSidebarAgentPanel({
 		sendTaskChatMessage,
 		loadTaskChatMessages,
 		cancelTaskChatTurn,
-	} = useClineChatRuntimeActions({
+	} = useAgentChatRuntimeActions({
 		currentProjectId,
 		onSessionSummary: upsertSessionSummary,
 	});
@@ -114,7 +114,7 @@ export function useHomeSidebarAgentPanel({
 	const homeTaskChatMessages = taskId ? (taskChatMessagesByTaskId[taskId] ?? []) : [];
 	const latestHomeTaskChatMessage = selectLatestTaskChatMessageForTask(taskId, latestTaskChatMessage);
 
-	const handleSendHomeClineChatMessage = useCallback(
+	const handleSendHomeAgentChatMessage = useCallback(
 		async (messageTaskId: string, text: string, options?: { mode?: "act" | "plan" }) => {
 			const result = await sendTaskChatMessage(messageTaskId, text, options);
 			if (!result.ok) {
@@ -130,12 +130,12 @@ export function useHomeSidebarAgentPanel({
 		[currentProjectId, sendTaskChatMessage],
 	);
 
-	const handleLoadHomeClineChatMessages = useCallback(
+	const handleLoadHomeAgentChatMessages = useCallback(
 		async (messageTaskId: string) => await loadTaskChatMessages(messageTaskId),
 		[loadTaskChatMessages],
 	);
 
-	const handleCancelHomeClineChatTurn = useCallback(
+	const handleCancelHomeAgentChatTurn = useCallback(
 		async (messageTaskId: string) => await cancelTaskChatTurn(messageTaskId),
 		[cancelTaskChatTurn],
 	);
@@ -154,7 +154,7 @@ export function useHomeSidebarAgentPanel({
 
 	if (panelMode === "chat" && taskId) {
 		return (
-			<ClineAgentChatPanel
+			<AgentChatPanel
 				key={taskId}
 				taskId={taskId}
 				summary={homeAgentPanelSummary ?? createIdleTaskSession(taskId)}
@@ -162,13 +162,13 @@ export function useHomeSidebarAgentPanel({
 				showComposerModeToggle={false}
 				workspaceId={currentProjectId}
 				runtimeConfig={runtimeProjectConfig}
-				onSendMessage={handleSendHomeClineChatMessage}
-				onCancelTurn={handleCancelHomeClineChatTurn}
-				onLoadMessages={handleLoadHomeClineChatMessages}
+				onSendMessage={handleSendHomeAgentChatMessage}
+				onCancelTurn={handleCancelHomeAgentChatTurn}
+				onLoadMessages={handleLoadHomeAgentChatMessages}
 				incomingMessage={latestHomeTaskChatMessage}
 				incomingMessages={homeTaskChatMessages}
 				showRightBorder={false}
-				composerPlaceholder="Ask Cline to add, edit, start, or link tasks"
+				composerPlaceholder="Ask the agent to add, edit, start, or link tasks"
 			/>
 		);
 	}
@@ -191,17 +191,9 @@ export function useHomeSidebarAgentPanel({
 		);
 	}
 
-	if (runtimeProjectConfig.selectedAgentId !== "cline") {
-		return (
-			<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 text-center text-sm text-text-secondary">
-				No runnable {selectedAgentLabel} command is configured. Open Settings, install the CLI, and select it.
-			</div>
-		);
-	}
-
 	return (
 		<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 text-center text-sm text-text-secondary">
-			Select a Cline provider in Settings to start a home chat session.
+			No runnable {selectedAgentLabel} command is configured. Open Settings, install the CLI, and select it.
 		</div>
 	);
 }

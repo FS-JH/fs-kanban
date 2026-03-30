@@ -18,7 +18,7 @@ import {
 } from "../core/api-validation.js";
 import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
-import type { ClineTaskSessionService } from "../cline-sdk/cline-task-session-service.js";
+import type { TaskSessionService } from "../cline-sdk/cline-task-session-service.js";
 import {
 	createEmptyWorkspaceChangesResponse,
 	getWorkspaceChanges,
@@ -38,10 +38,14 @@ import type { RuntimeTrpcContext } from "./app-router.js";
 
 export interface CreateWorkspaceApiDependencies {
 	ensureTerminalManagerForWorkspace: (workspaceId: string, repoPath: string) => Promise<TerminalSessionManager>;
-	getScopedClineTaskSessionService: (scope: {
+	getScopedTaskSessionService?: (scope: {
 		workspaceId: string;
 		workspacePath: string;
-	}) => Promise<ClineTaskSessionService>;
+	}) => Promise<TaskSessionService>;
+	getScopedClineTaskSessionService?: (scope: {
+		workspaceId: string;
+		workspacePath: string;
+	}) => Promise<TaskSessionService>;
 	broadcastRuntimeWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void> | void;
 	broadcastRuntimeProjectsUpdated: (preferredCurrentProjectId: string | null) => Promise<void> | void;
 	buildWorkspaceStateSnapshot: (workspaceId: string, workspacePath: string) => Promise<RuntimeWorkspaceStateResponse>;
@@ -95,24 +99,21 @@ function isActiveTaskSessionState(summary: RuntimeTaskSessionSummary | null): bo
 
 function selectLastTurnSummary(
 	terminalSummary: RuntimeTaskSessionSummary | null,
-	clineSummary: RuntimeTaskSessionSummary | null,
+	taskSummary: RuntimeTaskSessionSummary | null,
 ): RuntimeTaskSessionSummary | null {
 	if (!terminalSummary) {
-		return clineSummary;
+		return taskSummary;
 	}
-	if (!clineSummary) {
+	if (!taskSummary) {
 		return terminalSummary;
 	}
 	const terminalIsActive = isActiveTaskSessionState(terminalSummary);
-	const clineIsActive = isActiveTaskSessionState(clineSummary);
-	if (terminalIsActive !== clineIsActive) {
-		return clineIsActive ? clineSummary : terminalSummary;
+	const taskIsActive = isActiveTaskSessionState(taskSummary);
+	if (terminalIsActive !== taskIsActive) {
+		return taskIsActive ? taskSummary : terminalSummary;
 	}
-	if (terminalSummary.updatedAt !== clineSummary.updatedAt) {
-		return terminalSummary.updatedAt > clineSummary.updatedAt ? terminalSummary : clineSummary;
-	}
-	if (clineSummary.agentId === "cline" && terminalSummary.agentId !== "cline") {
-		return clineSummary;
+	if (terminalSummary.updatedAt !== taskSummary.updatedAt) {
+		return terminalSummary.updatedAt > taskSummary.updatedAt ? terminalSummary : taskSummary;
 	}
 	return terminalSummary;
 }
@@ -191,6 +192,16 @@ function createEmptyGitDiscardErrorResponse(error: unknown): RuntimeGitDiscardRe
 }
 
 export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): RuntimeTrpcContext["workspaceApi"] {
+	const getTaskSessionService = async (workspaceScope: {
+		workspaceId: string;
+		workspacePath: string;
+	}): Promise<TaskSessionService> => {
+		const service = deps.getScopedTaskSessionService ?? deps.getScopedClineTaskSessionService;
+		if (!service) {
+			throw new Error("No task session service is available.");
+		}
+		return await service(workspaceScope);
+	};
 	return {
 		loadGitSummary: async (workspaceScope, input) => {
 			try {
@@ -280,10 +291,10 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 					workspaceScope.workspaceId,
 					workspaceScope.workspacePath,
 				);
-				const clineTaskSessionService = await deps.getScopedClineTaskSessionService(workspaceScope);
+				const taskSessionService = await getTaskSessionService(workspaceScope);
 				const summary = selectLastTurnSummary(
 					terminalManager.getSummary(normalizedInput.taskId),
-					clineTaskSessionService.getSummary(normalizedInput.taskId),
+					taskSessionService.getSummary(normalizedInput.taskId),
 				);
 				const fromCheckpoint = summary?.previousTurnCheckpoint;
 				const toCheckpoint = summary?.latestTurnCheckpoint;

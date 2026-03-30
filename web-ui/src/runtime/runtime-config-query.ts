@@ -1,4 +1,4 @@
-// Browser-side query helpers for runtime settings and Cline actions.
+// Browser-side query helpers for runtime settings and agent-provider actions.
 // Keep TRPC request details here so components and controller hooks can focus
 // on state orchestration instead of transport plumbing.
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
@@ -42,7 +42,7 @@ export async function saveRuntimeConfig(
 	return await trpcClient.runtime.saveConfig.mutate(nextConfig);
 }
 
-export async function saveClineProviderSettings(
+export async function saveAgentProviderSettings(
 	workspaceId: string | null,
 	input: {
 		providerId: string;
@@ -53,35 +53,35 @@ export async function saveClineProviderSettings(
 	},
 ): Promise<RuntimeClineProviderSettings> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	return await trpcClient.runtime.saveClineProviderSettings.mutate(input);
+	return await trpcClient.runtime.saveProviderSettings.mutate(input);
 }
 
-export async function fetchClineProviderCatalog(workspaceId: string | null): Promise<RuntimeClineProviderCatalogItem[]> {
+export async function fetchAgentProviderCatalog(workspaceId: string | null): Promise<RuntimeClineProviderCatalogItem[]> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	const response = await trpcClient.runtime.getClineProviderCatalog.query();
+	const response = await trpcClient.runtime.getProviderCatalog.query();
 	return response.providers;
 }
 
-export async function fetchClineAccountProfile(workspaceId: string | null): Promise<RuntimeClineAccountProfileResponse> {
+export async function fetchAgentAccountProfile(workspaceId: string | null): Promise<RuntimeClineAccountProfileResponse> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	return await trpcClient.runtime.getClineAccountProfile.query();
+	return await trpcClient.runtime.getAccountProfile.query();
 }
 
-export async function fetchClineKanbanAccess(workspaceId: string | null): Promise<RuntimeClineKanbanAccessResponse> {
+export async function fetchAgentKanbanAccess(workspaceId: string | null): Promise<RuntimeClineKanbanAccessResponse> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	return await trpcClient.runtime.getClineKanbanAccess.query();
+	return await trpcClient.runtime.getKanbanAccess.query();
 }
 
-export async function fetchClineProviderModels(
+export async function fetchAgentProviderModels(
 	workspaceId: string | null,
 	providerId: string,
 ): Promise<RuntimeClineProviderModel[]> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	const response = await trpcClient.runtime.getClineProviderModels.query({ providerId });
+	const response = await trpcClient.runtime.getProviderModels.query({ providerId });
 	return response.models;
 }
 
-export async function runClineProviderOauthLogin(
+export async function runAgentProviderOauthLogin(
 	workspaceId: string | null,
 	input: {
 		provider: RuntimeClineOauthProvider;
@@ -89,37 +89,37 @@ export async function runClineProviderOauthLogin(
 	},
 ): Promise<RuntimeClineOauthLoginResponse> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	return await trpcClient.runtime.runClineProviderOAuthLogin.mutate(input);
+	return await trpcClient.runtime.runProviderOAuthLogin.mutate(input);
 }
 
-export async function fetchClineMcpSettings(workspaceId: string | null): Promise<RuntimeClineMcpSettingsResponse> {
+export async function fetchAgentMcpSettings(workspaceId: string | null): Promise<RuntimeClineMcpSettingsResponse> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	return await trpcClient.runtime.getClineMcpSettings.query();
+	return await trpcClient.runtime.getMcpSettings.query();
 }
 
-export async function fetchClineMcpAuthStatuses(workspaceId: string | null): Promise<RuntimeClineMcpAuthStatusResponse> {
+export async function fetchAgentMcpAuthStatuses(workspaceId: string | null): Promise<RuntimeClineMcpAuthStatusResponse> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	return await trpcClient.runtime.getClineMcpAuthStatuses.query();
+	return await trpcClient.runtime.getMcpAuthStatuses.query();
 }
 
-export async function saveClineMcpSettings(
+export async function saveAgentMcpSettings(
 	workspaceId: string | null,
 	input: {
 		servers: RuntimeClineMcpServer[];
 	},
 ): Promise<RuntimeClineMcpSettingsResponse> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	return await trpcClient.runtime.saveClineMcpSettings.mutate(input);
+	return await trpcClient.runtime.saveMcpSettings.mutate(input);
 }
 
-export async function runClineMcpServerOAuth(
+export async function runAgentMcpServerOAuth(
 	workspaceId: string | null,
 	input: {
 		serverName: string;
 	},
 ): Promise<RuntimeClineMcpOAuthResponse> {
 	const trpcClient = getRuntimeTrpcClient(workspaceId);
-	return await trpcClient.runtime.runClineMcpServerOAuth.mutate(input);
+	return await trpcClient.runtime.runMcpServerOAuth.mutate(input);
 }
 
 export async function resetRuntimeDebugState(workspaceId: string | null): Promise<RuntimeDebugResetAllStateResponse> {

@@ -1,6 +1,6 @@
-// Persists Kanban-owned runtime preferences on disk.
-// This module should store Kanban settings such as selected agents,
-// shortcuts, and prompt templates, not SDK-owned Cline secrets or OAuth data.
+// Persists FS Kanban-owned runtime preferences on disk.
+// This module should store board settings such as selected agents,
+// shortcuts, and prompt templates, not SDK-owned secrets or OAuth data.
 import { readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -50,14 +50,14 @@ export interface RuntimeConfigUpdateInput {
 	openPrPromptTemplate?: string;
 }
 
-const RUNTIME_HOME_PARENT_DIR = ".cline";
-const RUNTIME_HOME_DIR = "kanban";
+const RUNTIME_HOME_PARENT_DIR = ".config";
+const RUNTIME_HOME_DIR = "fs-kanban";
 const CONFIG_FILENAME = "config.json";
-const PROJECT_CONFIG_PARENT_DIR = ".cline";
-const PROJECT_CONFIG_DIR = "kanban";
+const PROJECT_CONFIG_PARENT_DIR = ".fs-kanban";
+const PROJECT_CONFIG_DIR = "";
 const PROJECT_CONFIG_FILENAME = "config.json";
-const DEFAULT_AGENT_ID: RuntimeAgentId = "cline";
-const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["claude", "codex"];
+const DEFAULT_AGENT_ID: RuntimeAgentId = "codex";
+const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["codex", "claude"];
 const DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED = true;
 const DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED = true;
 const DEFAULT_COMMIT_PROMPT_TEMPLATE = `You are in a worktree on a detached HEAD. When you are finished with the task, commit the working changes onto {{base_ref}}.
@@ -123,8 +123,7 @@ function normalizeAgentId(agentId: RuntimeAgentId | string | null | undefined): 
 			agentId === "codex" ||
 			agentId === "gemini" ||
 			agentId === "opencode" ||
-			agentId === "droid" ||
-			agentId === "cline") &&
+			agentId === "droid") &&
 		isRuntimeAgentLaunchSupported(agentId)
 	) {
 		return agentId;

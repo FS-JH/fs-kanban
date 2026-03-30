@@ -6,14 +6,6 @@ import { useLinkedBacklogTaskActions } from "@/hooks/use-linked-backlog-task-act
 import { getDetailTerminalTaskId } from "@/hooks/use-terminal-panels";
 import type { BoardCard, BoardData, BoardDependency } from "@/types";
 
-const trackTaskDependencyCreatedMock = vi.hoisted(() => vi.fn());
-const trackTasksAutoStartedFromDependencyMock = vi.hoisted(() => vi.fn());
-
-vi.mock("@/telemetry/events", () => ({
-	trackTaskDependencyCreated: trackTaskDependencyCreatedMock,
-	trackTasksAutoStartedFromDependency: trackTasksAutoStartedFromDependencyMock,
-}));
-
 function createTask(taskId: string, prompt: string, createdAt: number): BoardCard {
 	return {
 		id: taskId,
@@ -123,8 +115,6 @@ describe("useLinkedBacklogTaskActions", () => {
 	let previousActEnvironment: boolean | undefined;
 
 	beforeEach(() => {
-		trackTaskDependencyCreatedMock.mockReset();
-		trackTasksAutoStartedFromDependencyMock.mockReset();
 		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
 			.IS_REACT_ACT_ENVIRONMENT;
 		(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -146,7 +136,7 @@ describe("useLinkedBacklogTaskActions", () => {
 		}
 	});
 
-	it("tracks dependency creation after a valid link is added", async () => {
+	it("adds a valid dependency", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		await act(async () => {
@@ -173,7 +163,6 @@ describe("useLinkedBacklogTaskActions", () => {
 		}
 		const snapshot = latestSnapshot as HookSnapshot;
 
-		expect(trackTaskDependencyCreatedMock).toHaveBeenCalledTimes(1);
 		expect(snapshot.board.dependencies).toHaveLength(1);
 		expect(snapshot.board.dependencies[0]).toMatchObject({
 			fromTaskId: "task-1",
@@ -181,7 +170,7 @@ describe("useLinkedBacklogTaskActions", () => {
 		});
 	});
 
-	it("tracks how many linked tasks were auto-started when a parent task is trashed", async () => {
+	it("auto-starts linked tasks when a parent task is trashed", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 		const kickoffTaskInProgress = vi.fn(async () => true);
 		const boardFactory = () =>
@@ -216,7 +205,6 @@ describe("useLinkedBacklogTaskActions", () => {
 		});
 
 		expect(kickoffTaskInProgress).toHaveBeenCalledTimes(2);
-		expect(trackTasksAutoStartedFromDependencyMock).toHaveBeenCalledWith(2);
 	});
 
 	it("uses animated backlog starts for dependency-unblocked tasks when available", async () => {
@@ -262,7 +250,6 @@ describe("useLinkedBacklogTaskActions", () => {
 		expect(startBacklogTaskWithAnimation.mock.calls[1]?.[0]).toMatchObject({ id: "task-3" });
 		expect(waitForBacklogStartAnimationAvailability).toHaveBeenCalledTimes(1);
 		expect(kickoffTaskInProgress).not.toHaveBeenCalled();
-		expect(trackTasksAutoStartedFromDependencyMock).toHaveBeenCalledWith(1);
 	});
 
 	it("stops the main task session and its detail terminal shell when a task is trashed", async () => {
@@ -396,6 +383,5 @@ describe("useLinkedBacklogTaskActions", () => {
 			await movePromise;
 		});
 
-		expect(trackTasksAutoStartedFromDependencyMock).toHaveBeenCalledWith(2);
 	});
 });

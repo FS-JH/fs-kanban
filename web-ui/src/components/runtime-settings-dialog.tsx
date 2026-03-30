@@ -1,6 +1,6 @@
-// Settings dialog composition for Kanban.
-// Generic app settings live here, while Cline-specific provider state and
-// side effects should stay in use-runtime-settings-cline-controller.ts.
+// Settings dialog composition for FS Kanban.
+// Generic app settings live here, while agent-specific launch details stay in
+// focused runtime helpers instead of accumulating in the dialog.
 import * as RadixCheckbox from "@radix-ui/react-checkbox";
 import * as RadixPopover from "@radix-ui/react-popover";
 import * as RadixSwitch from "@radix-ui/react-switch";
@@ -8,7 +8,6 @@ import { getRuntimeAgentCatalogEntry, getRuntimeLaunchSupportedAgentCatalog } fr
 import { areRuntimeProjectShortcutsEqual } from "@runtime-shortcuts";
 import { Check, ChevronDown, Circle, CircleDot, ExternalLink, Plus, Settings, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ClineSetupSection } from "@/components/shared/cline-setup-section";
 import {
 	getRuntimeShortcutIconComponent,
 	getRuntimeShortcutPickerOption,
@@ -20,11 +19,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { TASK_GIT_BASE_REF_PROMPT_VARIABLE, type TaskGitAction } from "@/git-actions/build-task-git-action-prompt";
-import { useRuntimeSettingsClineController } from "@/hooks/use-runtime-settings-cline-controller";
-import { useRuntimeSettingsClineMcpController } from "@/hooks/use-runtime-settings-cline-mcp-controller";
 import type {
 	RuntimeAgentId,
-	RuntimeClineMcpServerAuthStatus,
 	RuntimeConfigResponse,
 	RuntimeProjectShortcut,
 } from "@/runtime/types";
@@ -54,9 +50,6 @@ function quoteCommandPartForDisplay(part: string): string {
 }
 
 function buildDisplayedAgentCommand(agentId: RuntimeAgentId, binary: string, autonomousModeEnabled: boolean): string {
-	if (agentId === "cline") {
-		return "";
-	}
 	const args = autonomousModeEnabled ? (getRuntimeAgentCatalogEntry(agentId)?.autonomousArgs ?? []) : [];
 	return [binary, ...args.map(quoteCommandPartForDisplay)].join(" ");
 }
@@ -72,7 +65,7 @@ const GIT_PROMPT_VARIANT_OPTIONS: Array<{ value: TaskGitAction; label: string }>
 
 export type RuntimeSettingsSection = "shortcuts";
 
-const SETTINGS_AGENT_ORDER: readonly RuntimeAgentId[] = ["cline", "claude", "codex"];
+const SETTINGS_AGENT_ORDER: readonly RuntimeAgentId[] = ["codex", "claude"];
 
 function getShortcutIconOption(icon: string | undefined): RuntimeShortcutIconOption {
 	return getRuntimeShortcutPickerOption(icon);
@@ -118,9 +111,8 @@ function AgentRow({
 	disabled: boolean;
 }): React.ReactElement {
 	const installUrl = getRuntimeAgentCatalogEntry(agent.id)?.installUrl;
-	const isNativeCline = agent.id === "cline";
 	const isInstalled = agent.installed === true;
-	const isInstallStatusPending = !isNativeCline && agent.installed === null;
+	const isInstallStatusPending = agent.installed === null;
 
 	return (
 		<div
@@ -151,7 +143,7 @@ function AgentRow({
 				<div className="min-w-0">
 					<div className="flex items-center gap-2">
 						<span className="text-[13px] text-text-primary">{agent.label}</span>
-						{!isNativeCline && isInstalled ? (
+						{isInstalled ? (
 							<span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-status-green/10 text-status-green">
 								Installed
 							</span>
@@ -166,7 +158,7 @@ function AgentRow({
 					) : null}
 				</div>
 			</div>
-			{!isNativeCline && agent.installed === false && installUrl ? (
+			{agent.installed === false && installUrl ? (
 				<a
 					href={installUrl}
 					target="_blank"
@@ -176,7 +168,7 @@ function AgentRow({
 				>
 					Install
 				</a>
-			) : !isNativeCline && agent.installed === false ? (
+			) : agent.installed === false ? (
 				<Button size="sm" disabled>
 					Install
 				</Button>
@@ -282,7 +274,6 @@ export function RuntimeSettingsDialog({
 	open,
 	workspaceId,
 	initialConfig = null,
-	liveMcpAuthStatuses = null,
 	onOpenChange,
 	onSaved,
 	initialSection,
@@ -290,7 +281,6 @@ export function RuntimeSettingsDialog({
 	open: boolean;
 	workspaceId: string | null;
 	initialConfig?: RuntimeConfigResponse | null;
-	liveMcpAuthStatuses?: RuntimeClineMcpServerAuthStatus[] | null;
 	onOpenChange: (open: boolean) => void;
 	onSaved?: () => void;
 	initialSection?: RuntimeSettingsSection | null;
@@ -337,13 +327,13 @@ export function RuntimeSettingsDialog({
 				id: agent.id,
 				label: agent.label,
 				binary: agent.binary,
-				installed: agent.id === "cline" ? true : agent.installed,
+				installed: agent.installed,
 			})) ??
 			getRuntimeLaunchSupportedAgentCatalog().map((agent) => ({
 				id: agent.id,
 				label: agent.label,
 				binary: agent.binary,
-				installed: agent.id === "cline" ? true : null,
+				installed: null,
 			}));
 		const orderIndexByAgentId = new Map(SETTINGS_AGENT_ORDER.map((agentId, index) => [agentId, index] as const));
 		const orderedAgents = [...agents].sort((left, right) => {
@@ -366,18 +356,6 @@ export function RuntimeSettingsDialog({
 	const initialShortcuts = config?.shortcuts ?? [];
 	const initialCommitPromptTemplate = config?.commitPromptTemplate ?? "";
 	const initialOpenPrPromptTemplate = config?.openPrPromptTemplate ?? "";
-	const clineSettings = useRuntimeSettingsClineController({
-		open,
-		workspaceId,
-		selectedAgentId,
-		config,
-	});
-	const clineMcpSettings = useRuntimeSettingsClineMcpController({
-		open,
-		workspaceId,
-		selectedAgentId,
-		liveAuthStatuses: liveMcpAuthStatuses,
-	});
 	const hasUnsavedChanges = useMemo(() => {
 		if (!config) {
 			return false;
@@ -389,12 +367,6 @@ export function RuntimeSettingsDialog({
 			return true;
 		}
 		if (readyForReviewNotificationsEnabled !== initialReadyForReviewNotificationsEnabled) {
-			return true;
-		}
-		if (clineSettings.hasUnsavedChanges) {
-			return true;
-		}
-		if (clineMcpSettings.hasUnsavedChanges) {
 			return true;
 		}
 		if (!areRuntimeProjectShortcutsEqual(shortcuts, initialShortcuts)) {
@@ -412,8 +384,6 @@ export function RuntimeSettingsDialog({
 		);
 	}, [
 		agentAutonomousModeEnabled,
-		clineMcpSettings.hasUnsavedChanges,
-		clineSettings.hasUnsavedChanges,
 		commitPromptTemplate,
 		config,
 		initialAgentAutonomousModeEnabled,
@@ -544,22 +514,6 @@ export function RuntimeSettingsDialog({
 			const nextPermission = await requestBrowserNotificationPermission();
 			setNotificationPermission(nextPermission);
 		}
-		if (selectedAgentId === "cline" && clineSettings.providerId.trim().length === 0) {
-			setSaveError("Choose a Cline provider before saving.");
-			return;
-		}
-		if (selectedAgentId === "cline") {
-			const clineProviderSaveResult = await clineSettings.saveProviderSettings();
-			if (!clineProviderSaveResult.ok) {
-				setSaveError(clineProviderSaveResult.message ?? "Could not save Cline provider settings.");
-				return;
-			}
-			const clineMcpSaveResult = await clineMcpSettings.saveMcpSettings();
-			if (!clineMcpSaveResult.ok) {
-				setSaveError(clineMcpSaveResult.message ?? "Could not save Cline MCP settings.");
-				return;
-			}
-		}
 		const saved = await save({
 			selectedAgentId,
 			agentAutonomousModeEnabled,
@@ -608,7 +562,7 @@ export function RuntimeSettingsDialog({
 						}
 					}}
 				>
-					{config?.globalConfigPath ? formatPathForDisplay(config.globalConfigPath) : "~/.cline/kanban/config.json"}
+					{config?.globalConfigPath ? formatPathForDisplay(config.globalConfigPath) : "~/.config/fs-kanban/config.json"}
 					{config?.globalConfigPath ? <ExternalLink size={12} className="inline ml-1.5 align-middle" /> : null}
 				</p>
 
@@ -646,16 +600,6 @@ export function RuntimeSettingsDialog({
 				<p className="text-text-secondary text-[13px] ml-6 mt-0 mb-0">
 					Allows agents to use tools without stopping for permission. Use at your own risk.
 				</p>
-
-				{selectedAgentId === "cline" ? (
-					<ClineSetupSection
-						controller={clineSettings}
-						mcpController={clineMcpSettings}
-						controlsDisabled={controlsDisabled}
-						workspaceId={workspaceId}
-						onError={setSaveError}
-					/>
-				) : null}
 
 				<div className="flex items-center justify-between mt-4 mb-1">
 					<h6 className="font-semibold text-text-primary m-0">Git button prompts</h6>
@@ -746,7 +690,7 @@ export function RuntimeSettingsDialog({
 						}
 					}}
 				>
-					{config?.projectConfigPath ? formatPathForDisplay(config.projectConfigPath) : "<project>/.cline/kanban/config.json"}
+					{config?.projectConfigPath ? formatPathForDisplay(config.projectConfigPath) : "<project>/.fs-kanban/config.json"}
 					{config?.projectConfigPath ? <ExternalLink size={12} className="inline ml-1.5 align-middle" /> : null}
 				</p>
 

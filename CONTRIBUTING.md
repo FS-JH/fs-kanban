@@ -1,23 +1,23 @@
-# Contributing to Kanban
+# Contributing to FS Kanban
 
-Thanks for your interest in contributing to Kanban! This project is in research preview, and we're focused on making the existing feature set rock-solid across platforms and agents before expanding scope. Community help is invaluable here.
+Thanks for your interest in contributing to FS Kanban. This project is in research preview, and we're focused on making the existing feature set rock-solid across platforms and agents before expanding scope.
 
 ## What We're Looking For
 
-Kanban currently supports Claude, Codex, Gemini, OpenCode, Droid, and Cline as runtime agents, and runs on macOS, Linux, and Windows. The surface area for cross-compatibility issues is large, and that's where contributions have the most impact.
+FS Kanban currently focuses on Claude and Codex as the primary runtime agents, and runs on macOS, Linux, and Windows. The surface area for cross-compatibility issues is large, and that's where contributions have the most impact.
 
 We are actively looking for help with:
 
 - Cross-platform support: fixing bugs and inconsistencies across macOS, Linux, and Windows (terminal behavior, path handling, symlinks, shell detection, etc.)
-- Agent compatibility: adding support for new CLI agents, fixing integration issues with existing ones, and improving agent detection/lifecycle management
+- Agent compatibility: improving integration issues with the supported CLI agents and tightening agent detection/lifecycle management
 - Bug fixes: anything that makes the current feature set more stable and reliable
 - Test coverage: adding tests for untested paths, especially platform-specific and agent-specific behavior
 
-We are not currently accepting feature PRs. If you have a feature idea, please open a [Feature Request discussion](https://github.com/cline/kanban/discussions/categories/feature-requests) instead. We may incorporate it into the roadmap, but the priority right now is stability and compatibility.
+We are not currently accepting feature PRs. If you have a feature idea, open an issue first so we can decide whether it belongs in the roadmap. The priority right now is stability and compatibility.
 
 ## Reporting Bugs
 
-Before opening a new issue, search [existing issues](https://github.com/cline/kanban/issues) to avoid duplicates. When filing a bug, include:
+Before opening a new issue, search the existing issue tracker to avoid duplicates. When filing a bug, include:
 
 - Your OS and version
 - Which CLI agent you're using (and its version)
@@ -25,7 +25,7 @@ Before opening a new issue, search [existing issues](https://github.com/cline/ka
 - Expected vs. actual behavior
 - Any relevant terminal output or screenshots
 
-If you discover a security vulnerability, please report it privately using [GitHub's security advisory tool](https://github.com/cline/kanban/security/advisories/new).
+If you discover a security vulnerability, report it privately through GitHub security advisories.
 
 ## Before Contributing
 
@@ -37,8 +37,8 @@ PRs without a corresponding issue may be closed.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/cline/kanban.git
-   cd kanban
+   git clone <fork-url>
+   cd fs-kanban
    ```
 
 2. Install dependencies:
@@ -86,13 +86,12 @@ Look at the existing agent implementations in `src/` for reference. The agent li
 
 ## Philosophy
 
-Kanban is in foundation mode. Favor clear primitives and good tooling over early complexity. Build extensibility into the core, then layer product features iteratively.
+FS Kanban is in foundation mode. Favor clear primitives and good tooling over early complexity. Build extensibility into the core, then layer product features iteratively.
 
 ## Community
 
-- [Discord](https://discord.gg/cline) (join the #kanban channel)
-- [Feature Requests](https://github.com/cline/kanban/discussions/categories/feature-requests)
-- [Issues](https://github.com/cline/kanban/issues)
+- Use the fork's issue tracker for bugs and feature requests
+- Use your team chat or existing project channel for day-to-day coordination
 
 ## License
 

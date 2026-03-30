@@ -35,7 +35,7 @@ export async function ensureInitialCommit(projectPath: string): Promise<Initiali
 		"commit",
 		"--allow-empty",
 		"-m",
-		"Initial commit through Cline Kanban",
+		"Initial commit through FS Kanban",
 	]);
 
 	if (!commitResult.ok) {

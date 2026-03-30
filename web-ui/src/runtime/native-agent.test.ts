@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
 	getTaskAgentNavbarHint,
-	isClineProviderAuthenticated,
-	isNativeClineAgentSelected,
+	isAgentProviderAuthenticated,
+	isNativeTaskAgentSelected,
 	isTaskAgentSetupSatisfied,
 	selectLatestTaskChatMessageForTask,
 	selectTaskChatMessagesForTask,
@@ -83,16 +83,16 @@ function createLatestTaskChatMessage(taskId: string): RuntimeStateStreamTaskChat
 
 describe("native-agent helpers", () => {
 	it("treats cline as the native chat agent", () => {
-		expect(isNativeClineAgentSelected("cline")).toBe(true);
-		expect(isNativeClineAgentSelected("codex")).toBe(false);
+		expect(isNativeTaskAgentSelected("cline")).toBe(true);
+		expect(isNativeTaskAgentSelected("codex")).toBe(false);
 	});
 
-	it("treats selected cline as task-ready when cline authentication is configured", () => {
-		expect(isTaskAgentSetupSatisfied(createRuntimeConfigResponse("cline"))).toBe(true);
+	it("treats any installed launch-supported agent as task-ready", () => {
+		expect(isTaskAgentSetupSatisfied(createRuntimeConfigResponse("codex"))).toBe(true);
 		expect(isTaskAgentSetupSatisfied(null)).toBeNull();
 	});
 
-	it("requires setup when cline is selected and cline authentication is missing", () => {
+	it("returns false when no launch-supported agent is installed", () => {
 		const config = createRuntimeConfigResponse("cline", {
 			agents: [
 				{
@@ -105,22 +105,11 @@ describe("native-agent helpers", () => {
 					configured: true,
 				},
 			],
-			clineProviderSettings: {
-				providerId: null,
-				modelId: null,
-				baseUrl: null,
-				apiKeyConfigured: false,
-				oauthProvider: null,
-				oauthAccessTokenConfigured: false,
-				oauthRefreshTokenConfigured: false,
-				oauthAccountId: null,
-				oauthExpiresAt: null,
-			},
 		});
 		expect(isTaskAgentSetupSatisfied(config)).toBe(false);
 	});
 
-	it("falls back to other installed launch-supported agents when cline auth is missing", () => {
+	it("returns true when any installed launch-supported agent exists", () => {
 		const config = createRuntimeConfigResponse("cline", {
 			agents: [
 				{
@@ -142,23 +131,12 @@ describe("native-agent helpers", () => {
 					configured: false,
 				},
 			],
-			clineProviderSettings: {
-				providerId: null,
-				modelId: null,
-				baseUrl: null,
-				apiKeyConfigured: false,
-				oauthProvider: null,
-				oauthAccessTokenConfigured: false,
-				oauthRefreshTokenConfigured: false,
-				oauthAccountId: null,
-				oauthExpiresAt: null,
-			},
 		});
 		expect(isTaskAgentSetupSatisfied(config)).toBe(true);
 	});
 
-	it("does not show the navbar setup hint when cline is configured through the native SDK path", () => {
-		expect(getTaskAgentNavbarHint(createRuntimeConfigResponse("cline"))).toBeUndefined();
+	it("does not show the navbar setup hint when a launch-supported agent is ready", () => {
+		expect(getTaskAgentNavbarHint(createRuntimeConfigResponse("codex"))).toBeUndefined();
 	});
 
 	it("shows the navbar setup hint when no task agent path is ready", () => {
@@ -174,17 +152,6 @@ describe("native-agent helpers", () => {
 					configured: true,
 				},
 			],
-			clineProviderSettings: {
-				providerId: null,
-				modelId: null,
-				baseUrl: null,
-				apiKeyConfigured: false,
-				oauthProvider: null,
-				oauthAccessTokenConfigured: false,
-				oauthRefreshTokenConfigured: false,
-				oauthAccountId: null,
-				oauthExpiresAt: null,
-			},
 		});
 		expect(getTaskAgentNavbarHint(config)).toBe("No agent configured");
 		expect(
@@ -196,7 +163,7 @@ describe("native-agent helpers", () => {
 
 	it("checks for a provider selection when determining cline authentication", () => {
 		expect(
-			isClineProviderAuthenticated({
+			isAgentProviderAuthenticated({
 				providerId: null,
 				modelId: null,
 				baseUrl: null,
@@ -209,7 +176,7 @@ describe("native-agent helpers", () => {
 			}),
 		).toBe(false);
 		expect(
-			isClineProviderAuthenticated({
+			isAgentProviderAuthenticated({
 				providerId: "anthropic",
 				modelId: null,
 				baseUrl: null,

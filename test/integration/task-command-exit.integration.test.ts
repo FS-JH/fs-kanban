@@ -105,7 +105,7 @@ async function waitForServerStart(process: ChildProcess, timeoutMs = 10_000): Pr
 			} else {
 				stderr += text;
 			}
-			if (!stdout.includes("Cline Kanban running at ") || settled) {
+			if (!stdout.includes("FS Kanban running at ") || settled) {
 				return;
 			}
 			settled = true;

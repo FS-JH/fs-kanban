@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { captureNodeException, flushNodeTelemetry } from "./telemetry/sentry-node.js";
 import { spawn, spawnSync } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
@@ -209,7 +208,7 @@ async function tryOpenExistingServer(options: { noOpen: boolean; shouldAutoOpenB
 	const projectUrl = workspaceId
 		? buildKanbanRuntimeUrl(`/${encodeURIComponent(workspaceId)}`)
 		: getKanbanRuntimeOrigin();
-	console.log(`Kanban already running at ${getKanbanRuntimeOrigin()}`);
+	console.log(`FS Kanban already running at ${getKanbanRuntimeOrigin()}`);
 	if (!options.noOpen && options.shouldAutoOpenBrowser) {
 		try {
 			const { openInBrowser } = await import("./server/browser.js");
@@ -297,7 +296,7 @@ async function startServer(): Promise<{
 
 		A regression in 25ba59f showed that eagerly importing the runtime stack here
 		could leave the source CLI process alive after the command had already printed
-		its JSON result. The issue first appeared after the native Cline SDK runtime
+		its JSON result. The issue first appeared after the native agent runtime layer
 		was added to the server import graph. We have not yet isolated the deepest
 		handle creator inside that graph, so we keep command-style subcommands on the
 		lightweight path and only load the server stack when we actually start Kanban.
@@ -355,7 +354,7 @@ async function startServer(): Promise<{
 		workspaceRegistry,
 		runtimeStateHub: runtimeHub,
 		warn: (message) => {
-			console.warn(`[kanban] ${message}`);
+			console.warn(`[fs-kanban] ${message}`);
 		},
 		ensureTerminalManagerForWorkspace: workspaceRegistry.ensureTerminalManagerForWorkspace,
 		resolveInteractiveShellCommand,
@@ -376,7 +375,7 @@ async function startServer(): Promise<{
 		await shutdownRuntimeServer({
 			workspaceRegistry,
 			warn: (message) => {
-				console.warn(`[kanban] ${message}`);
+				console.warn(`[fs-kanban] ${message}`);
 			},
 			closeRuntimeServer: close,
 			skipSessionCleanup: options?.skipSessionCleanup ?? false,
@@ -416,19 +415,12 @@ async function runMainCommand(options: CliOptions, shouldAutoOpenBrowser: boolea
 		console.log(`Binding to host ${options.host}.`);
 	}
 
-	const [{ openInBrowser }, { autoUpdateOnStartup, runPendingAutoUpdateOnShutdown }] = await Promise.all([
-		import("./server/browser.js"),
-		import("./update/auto-update.js"),
-	]);
+	const { openInBrowser } = await import("./server/browser.js");
 
 	const selectedPort = await applyRuntimePortOption(options.port);
 	if (selectedPort !== null) {
 		console.log(`Using runtime port ${selectedPort}.`);
 	}
-
-	autoUpdateOnStartup({
-		currentVersion: KANBAN_VERSION,
-	});
 
 	let runtime: Awaited<ReturnType<typeof startServer>>;
 	try {
@@ -443,7 +435,7 @@ async function runMainCommand(options: CliOptions, shouldAutoOpenBrowser: boolea
 		}
 		throw error;
 	}
-	console.log(`Cline Kanban running at ${runtime.url}`);
+	console.log(`FS Kanban running at ${runtime.url}`);
 	if (!options.noOpen && shouldAutoOpenBrowser) {
 		try {
 			openInBrowser(runtime.url, {
@@ -464,7 +456,6 @@ async function runMainCommand(options: CliOptions, shouldAutoOpenBrowser: boolea
 			return;
 		}
 		isShuttingDown = true;
-		runPendingAutoUpdateOnShutdown();
 		if (options.skipShutdownCleanup) {
 			console.warn("Skipping shutdown task cleanup for this instance.");
 		}
@@ -483,7 +474,6 @@ async function runMainCommand(options: CliOptions, shouldAutoOpenBrowser: boolea
 			await shutdown();
 		},
 		onShutdownError: (error) => {
-			captureNodeException(error, { area: "shutdown" });
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`Shutdown failed: ${message}`);
 		},
@@ -501,7 +491,7 @@ function createProgram(invocationArgs: string[]): Command {
 	const shouldAutoOpenBrowser = shouldAutoOpenBrowserTabForInvocation(invocationArgs);
 	const program = new Command();
 	program
-		.name("kanban")
+		.name("fs-kanban")
 		.description("Local orchestration board for coding agents.")
 		.version(KANBAN_VERSION, "-v, --version", "Output the version number")
 		.option("--host <ip>", "Host IP to bind the server to (default: 127.0.0.1).")
@@ -520,7 +510,7 @@ function createProgram(invocationArgs: string[]): Command {
 		.command("mcp")
 		.description("Deprecated compatibility command.")
 		.action(() => {
-			console.warn("Deprecated. Please uninstall Kanban MCP.");
+			console.warn("Deprecated. Please uninstall the legacy Kanban MCP bridge.");
 		});
 
 	program.action(async (options: RootCommandOptions) => {
@@ -545,9 +535,7 @@ async function run(): Promise<void> {
 }
 
 void run().catch(async (error) => {
-	captureNodeException(error, { area: "startup" });
-	await flushNodeTelemetry();
 	const message = error instanceof Error ? error.message : String(error);
-	console.error(`Failed to start Kanban: ${message}`);
+	console.error(`Failed to start FS Kanban: ${message}`);
 	process.exit(1);
 });

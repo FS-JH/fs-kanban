@@ -259,7 +259,7 @@ describe("BoardCard", () => {
 			);
 		});
 
-		expect(container.textContent).toContain("~/.cline/worktrees/trash-task-1/kanban");
+		expect(container.textContent).toContain("~/.config/fs-kanban/worktrees/trash-task-1/kanban");
 	});
 
 	it("shows tool input details in the session preview text", async () => {
@@ -297,7 +297,7 @@ describe("BoardCard", () => {
 			);
 		});
 
-		expect(container.textContent).toContain("Read(src/index.ts)");
+		expect(container.textContent).toContain("Read: src/index.ts");
 		expect(container.textContent).not.toContain("Using Read");
 	});
 
@@ -324,7 +324,7 @@ describe("BoardCard", () => {
 			);
 		});
 
-		expect(container.textContent).toContain("Read(src/index.ts)");
+		expect(container.textContent).toContain("Read: src/index.ts");
 		expect(container.textContent).not.toContain("Completed Read");
 	});
 
@@ -351,7 +351,7 @@ describe("BoardCard", () => {
 			);
 		});
 
-		expect(container.textContent).toContain("Read(src/index.ts)");
+		expect(container.textContent).toContain("Read: src/index.ts");
 		expect(container.textContent).not.toContain("Calling Read");
 	});
 
@@ -390,7 +390,7 @@ describe("BoardCard", () => {
 			);
 		});
 
-		expect(container.textContent).toContain("Read(src/index.ts)");
+		expect(container.textContent).toContain("Read: src/index.ts");
 		expect(container.textContent).not.toContain("Thinking...");
 	});
 

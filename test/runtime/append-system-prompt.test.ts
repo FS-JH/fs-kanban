@@ -7,24 +7,28 @@ import {
 } from "../../src/prompts/append-system-prompt.js";
 
 describe("resolveAppendSystemPromptCommandPrefix", () => {
-	it("returns npx prefix for npx transient installs", () => {
+	it("falls back to the current invocation for npx transient installs", () => {
 		const prefix = resolveAppendSystemPromptCommandPrefix({
 			currentVersion: "0.1.10",
 			cwd: "/Users/example/repo",
+			execPath: "/usr/local/bin/node",
+			execArgv: [],
 			argv: ["node", "/Users/example/.npm/_npx/593b71878a7c70f2/node_modules/kanban/dist/cli.js"],
 			resolveRealPath: (path) => path,
 		});
-		expect(prefix).toBe("npx -y kanban");
+		expect(prefix).toBe("'/usr/local/bin/node' '/Users/example/.npm/_npx/593b71878a7c70f2/node_modules/kanban/dist/cli.js'");
 	});
 
-	it("returns bun x prefix for bun x transient installs", () => {
+	it("falls back to the current invocation for bun x transient installs", () => {
 		const prefix = resolveAppendSystemPromptCommandPrefix({
 			currentVersion: "0.1.10",
 			cwd: "/Users/example/repo",
+			execPath: "/usr/local/bin/node",
+			execArgv: [],
 			argv: ["node", "/private/tmp/bunx-501-kanban@1.0.0/node_modules/kanban/dist/cli.js"],
 			resolveRealPath: (path) => path,
 		});
-		expect(prefix).toBe("bun x kanban");
+		expect(prefix).toBe("'/usr/local/bin/node' '/private/tmp/bunx-501-kanban@1.0.0/node_modules/kanban/dist/cli.js'");
 	});
 
 	it("falls back to the current runnable invocation for local entrypoints", () => {

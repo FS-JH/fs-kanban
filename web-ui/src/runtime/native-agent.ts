@@ -7,11 +7,11 @@ import type {
 } from "@/runtime/types";
 import { isRuntimeAgentLaunchSupported } from "@runtime-agent-catalog";
 
-export function isNativeClineAgentSelected(agentId: RuntimeAgentId | null | undefined): boolean {
+export function isNativeTaskAgentSelected(agentId: RuntimeAgentId | null | undefined): boolean {
 	return agentId === "cline";
 }
 
-export function getRuntimeClineProviderSettings(
+export function getRuntimeAgentProviderSettings(
 	config: Pick<RuntimeConfigResponse, "clineProviderSettings"> | null | undefined,
 ): RuntimeClineProviderSettings {
 	return (
@@ -30,7 +30,7 @@ export function getRuntimeClineProviderSettings(
 	);
 }
 
-export function isClineProviderAuthenticated(
+export function isAgentProviderAuthenticated(
 	settings: RuntimeClineProviderSettings | null | undefined,
 ): boolean {
 	if (!settings) {
@@ -45,24 +45,16 @@ export function isClineProviderAuthenticated(
 }
 
 export function isTaskAgentSetupSatisfied(
-	config: Pick<RuntimeConfigResponse, "selectedAgentId" | "agents" | "clineProviderSettings"> | null | undefined,
+	config: Pick<RuntimeConfigResponse, "agents"> | null | undefined,
 ): boolean | null {
 	if (!config) {
 		return null;
-	}
-	if (isNativeClineAgentSelected(config.selectedAgentId)) {
-		if (isClineProviderAuthenticated(getRuntimeClineProviderSettings(config))) {
-			return true;
-		}
-		return config.agents.some(
-			(agent) => agent.id !== "cline" && isRuntimeAgentLaunchSupported(agent.id) && agent.installed,
-		);
 	}
 	return config.agents.some((agent) => isRuntimeAgentLaunchSupported(agent.id) && agent.installed);
 }
 
 export function getTaskAgentNavbarHint(
-	config: Pick<RuntimeConfigResponse, "selectedAgentId" | "agents" | "clineProviderSettings"> | null | undefined,
+	config: Pick<RuntimeConfigResponse, "agents"> | null | undefined,
 	options?: {
 		shouldUseNavigationPath?: boolean;
 	},

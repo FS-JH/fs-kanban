@@ -77,7 +77,7 @@ export function createProjectsApi(deps: CreateProjectsApiDependencies): RuntimeT
 							project: null,
 							requiresGitInitialization: true,
 							error:
-								"This folder is not a git repository. Cline requires git to manage worktrees. Initialize git to continue.",
+								"This folder is not a git repository. FS Kanban requires git to manage worktrees. Initialize git to continue.",
 						} satisfies RuntimeProjectAddResponse;
 					}
 					const initResult = await initializeGitRepository(projectPath);

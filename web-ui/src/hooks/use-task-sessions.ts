@@ -6,9 +6,9 @@ import { useCallback } from "react";
 
 import { notifyError } from "@/components/app-toaster";
 import {
-	type ClineChatActionResult,
-	useClineChatRuntimeActions,
-} from "@/hooks/use-cline-chat-runtime-actions";
+	type AgentChatActionResult,
+	useAgentChatRuntimeActions,
+} from "@/hooks/use-agent-chat-runtime-actions";
 import { selectNewestTaskSessionSummary } from "@/hooks/home-sidebar-agent-panel-session-summary";
 import { estimateTaskSessionGeometry } from "@/runtime/task-session-geometry";
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
@@ -20,7 +20,6 @@ import type {
 	RuntimeWorktreeDeleteResponse,
 	RuntimeWorktreeEnsureResponse,
 } from "@/runtime/types";
-import { trackTaskResumedFromTrash } from "@/telemetry/events";
 import { getTerminalController } from "@/terminal/terminal-controller-registry";
 import { getTerminalGeometry } from "@/terminal/terminal-geometry-registry";
 import type { SendTerminalInputOptions } from "@/terminal/terminal-input";
@@ -65,9 +64,9 @@ export interface UseTaskSessionsResult {
 		taskId: string,
 		text: string,
 		options?: { mode?: RuntimeTaskSessionMode },
-	) => Promise<ClineChatActionResult>;
-	abortTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
-	cancelTaskChatTurn: (taskId: string) => Promise<ClineChatActionResult>;
+	) => Promise<AgentChatActionResult>;
+	abortTaskChatTurn: (taskId: string) => Promise<AgentChatActionResult>;
+	cancelTaskChatTurn: (taskId: string) => Promise<AgentChatActionResult>;
 	fetchTaskChatMessages: (taskId: string) => Promise<RuntimeTaskChatMessage[] | null>;
 	cleanupTaskWorkspace: (taskId: string) => Promise<RuntimeWorktreeDeleteResponse | null>;
 	fetchTaskWorkspaceInfo: (task: BoardCard) => Promise<RuntimeTaskWorkspaceInfoResponse | null>;
@@ -119,7 +118,7 @@ export function useTaskSessions({
 		loadTaskChatMessages: fetchTaskChatMessages,
 		abortTaskChatTurn,
 		cancelTaskChatTurn,
-	} = useClineChatRuntimeActions({
+	} = useAgentChatRuntimeActions({
 		currentProjectId,
 		onSessionSummary: upsertSession,
 	});
@@ -177,9 +176,6 @@ export function useTaskSessions({
 					};
 				}
 				upsertSession(payload.summary);
-				if (options?.resumeFromTrash) {
-					trackTaskResumedFromTrash();
-				}
 				return { ok: true };
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);

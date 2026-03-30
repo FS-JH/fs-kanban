@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { createHomeAgentSessionId, isHomeAgentSessionIdForWorkspace } from "@runtime-home-agent-session";
 
 import { notifyError } from "@/components/app-toaster";
-import { getRuntimeClineProviderSettings, isNativeClineAgentSelected } from "@/runtime/native-agent";
+import { getRuntimeAgentProviderSettings, isNativeTaskAgentSelected } from "@/runtime/native-agent";
 import { estimateTaskSessionGeometry } from "@/runtime/task-session-geometry";
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type {
@@ -50,14 +50,14 @@ interface HomeAgentWorkspaceDescriptor {
 	taskId: string;
 }
 
-function buildClineDescriptor(config: RuntimeConfigResponse): string {
-	const clineProviderSettings = getRuntimeClineProviderSettings(config);
+function buildAgentDescriptor(config: RuntimeConfigResponse): string {
+	const agentProviderSettings = getRuntimeAgentProviderSettings(config);
 	return JSON.stringify({
 		agentId: config.selectedAgentId,
-		providerId: clineProviderSettings.providerId ?? clineProviderSettings.oauthProvider ?? "",
-		modelId: clineProviderSettings.modelId ?? "",
-		baseUrl: clineProviderSettings.baseUrl ?? "",
-		reasoningEffort: clineProviderSettings.reasoningEffort ?? null,
+		providerId: agentProviderSettings.providerId ?? agentProviderSettings.oauthProvider ?? "",
+		modelId: agentProviderSettings.modelId ?? "",
+		baseUrl: agentProviderSettings.baseUrl ?? "",
+		reasoningEffort: agentProviderSettings.reasoningEffort ?? null,
 	});
 }
 
@@ -124,10 +124,10 @@ export function useHomeAgentSession({
 	const desiredTaskIdByWorkspaceRef = useRef(new Map<string, string>());
 	const startedSessionKeysRef = useRef(new Set<string>());
 	const pendingStartRequestIdsRef = useRef(new Map<string, number>());
-	const previousClineSessionContextVersionByWorkspaceRef = useRef(new Map<string, number>());
+	const previousAgentSessionContextVersionByWorkspaceRef = useRef(new Map<string, number>());
 	const nextStartRequestIdRef = useRef(0);
 	const disposedRef = useRef(false);
-	const clineProviderSettings = getRuntimeClineProviderSettings(runtimeProjectConfig);
+	const agentProviderSettings = getRuntimeAgentProviderSettings(runtimeProjectConfig);
 
 	useEffect(() => {
 		latestBaseRefRef.current = resolveHomeAgentBaseRef(workspaceGit);
@@ -140,9 +140,9 @@ export function useHomeAgentSession({
 
 		let panelMode: HomeAgentPanelMode;
 		let descriptorKey: string;
-		if (isNativeClineAgentSelected(runtimeProjectConfig.selectedAgentId)) {
+		if (isNativeTaskAgentSelected(runtimeProjectConfig.selectedAgentId)) {
 			panelMode = "chat";
-			descriptorKey = buildClineDescriptor(runtimeProjectConfig);
+			descriptorKey = buildAgentDescriptor(runtimeProjectConfig);
 		} else {
 			if (!runtimeProjectConfig.effectiveCommand) {
 				return null;
@@ -177,11 +177,11 @@ export function useHomeAgentSession({
 		};
 	}, [
 		currentProjectId,
-		clineProviderSettings.baseUrl,
-		clineProviderSettings.modelId,
-		clineProviderSettings.reasoningEffort,
-		clineProviderSettings.oauthProvider,
-		clineProviderSettings.providerId,
+		agentProviderSettings.baseUrl,
+		agentProviderSettings.modelId,
+		agentProviderSettings.reasoningEffort,
+		agentProviderSettings.oauthProvider,
+		agentProviderSettings.providerId,
 		runtimeProjectConfig?.effectiveCommand,
 		runtimeProjectConfig?.selectedAgentId,
 	]);
@@ -240,16 +240,16 @@ export function useHomeAgentSession({
 		});
 	}, [currentProjectId, descriptorTaskId, hasLoadedRuntimeProjectConfig, setSessionSummaries]);
 
-	// When MCP settings or auth change, the runtime bumps the Cline session context version.
+	// When MCP settings or auth change, the runtime bumps the Agent session context version.
 	// Reload the existing home chat in place so it keeps the same sidebar task id and messages,
-	// but restarts the underlying Cline session with a fresh MCP tool bundle.
+	// but restarts the underlying Agent session with a fresh MCP tool bundle.
 	useEffect(() => {
 		if (!currentProjectId || !descriptor || descriptor.panelMode !== "chat") {
 			return;
 		}
 
-		const previousVersion = previousClineSessionContextVersionByWorkspaceRef.current.get(currentProjectId);
-		previousClineSessionContextVersionByWorkspaceRef.current.set(currentProjectId, clineSessionContextVersion);
+		const previousVersion = previousAgentSessionContextVersionByWorkspaceRef.current.get(currentProjectId);
+		previousAgentSessionContextVersionByWorkspaceRef.current.set(currentProjectId, clineSessionContextVersion);
 
 		if (previousVersion === undefined || previousVersion === clineSessionContextVersion) {
 			return;
@@ -371,7 +371,7 @@ export function useHomeAgentSession({
 			homeDescriptorByWorkspaceRef.current.clear();
 			startedSessionKeysRef.current.clear();
 			pendingStartRequestIdsRef.current.clear();
-			previousClineSessionContextVersionByWorkspaceRef.current.clear();
+			previousAgentSessionContextVersionByWorkspaceRef.current.clear();
 		};
 	}, []);
 

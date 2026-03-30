@@ -73,6 +73,9 @@ export type RuntimeSlashCommandsResponse = z.infer<typeof runtimeSlashCommandsRe
 export const runtimeAgentIdSchema = z.enum(["claude", "codex", "gemini", "opencode", "droid", "cline"]);
 export type RuntimeAgentId = z.infer<typeof runtimeAgentIdSchema>;
 
+export const runtimeLaunchSupportedAgentIdSchema = z.enum(["claude", "codex"]);
+export type RuntimeLaunchSupportedAgentId = z.infer<typeof runtimeLaunchSupportedAgentIdSchema>;
+
 export const runtimeBoardColumnIdSchema = z.enum(["backlog", "in_progress", "review", "trash"]);
 export type RuntimeBoardColumnId = z.infer<typeof runtimeBoardColumnIdSchema>;
 

@@ -6,7 +6,6 @@ import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { BoardCard } from "@/types";
 
 const startTaskSessionMutateMock = vi.hoisted(() => vi.fn());
-const trackTaskResumedFromTrashMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/runtime/trpc-client", () => ({
 	getRuntimeTrpcClient: () => ({
@@ -20,10 +19,6 @@ vi.mock("@/runtime/trpc-client", () => ({
 
 vi.mock("@/runtime/task-session-geometry", () => ({
 	estimateTaskSessionGeometry: () => ({ cols: 120, rows: 40 }),
-}));
-
-vi.mock("@/telemetry/events", () => ({
-	trackTaskResumedFromTrash: trackTaskResumedFromTrashMock,
 }));
 
 interface HookSnapshot {
@@ -65,7 +60,6 @@ describe("useTaskSessions", () => {
 
 	beforeEach(() => {
 		startTaskSessionMutateMock.mockReset();
-		trackTaskResumedFromTrashMock.mockReset();
 		startTaskSessionMutateMock.mockResolvedValue({
 			ok: true,
 			summary: {
@@ -104,7 +98,7 @@ describe("useTaskSessions", () => {
 		}
 	});
 
-	it("tracks successful resume-from-trash starts", async () => {
+	it("starts a resume-from-trash session", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		await act(async () => {
@@ -125,10 +119,20 @@ describe("useTaskSessions", () => {
 			await latestSnapshot?.startTaskSession(createTask(), { resumeFromTrash: true });
 		});
 
-		expect(trackTaskResumedFromTrashMock).toHaveBeenCalledTimes(1);
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+			taskId: "task-1",
+			prompt: "",
+			startInPlanMode: undefined,
+			resumeFromTrash: true,
+			baseRef: "main",
+			cols: 120,
+			rows: 40,
+		}),
+		);
 	});
 
-	it("does not track regular task starts", async () => {
+	it("starts a regular task without resume-from-trash options", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		await act(async () => {
@@ -149,7 +153,17 @@ describe("useTaskSessions", () => {
 			await latestSnapshot?.startTaskSession(createTask());
 		});
 
-		expect(trackTaskResumedFromTrashMock).not.toHaveBeenCalled();
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+			taskId: "task-1",
+			prompt: "Resume me",
+			startInPlanMode: false,
+			resumeFromTrash: undefined,
+			baseRef: "main",
+			cols: 120,
+			rows: 40,
+		}),
+		);
 	});
 
 	it("forwards start-in-plan-mode from the task card when starting a task", async () => {
@@ -176,7 +190,8 @@ describe("useTaskSessions", () => {
 			});
 		});
 
-		expect(startTaskSessionMutateMock).toHaveBeenCalledWith({
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
 			taskId: "task-1",
 			prompt: "Resume me",
 			startInPlanMode: true,
@@ -184,7 +199,8 @@ describe("useTaskSessions", () => {
 			baseRef: "main",
 			cols: 120,
 			rows: 40,
-		});
+		}),
+		);
 	});
 
 	it("forwards task images when starting a task", async () => {
