@@ -1,6 +1,6 @@
 {
   "name": "fs-kanban",
-  "version": "0.1.48",
+  "version": "2.0.0",
   "description": "A personal orchestration board for coding agents",
   "publishConfig": {
     "access": "public",

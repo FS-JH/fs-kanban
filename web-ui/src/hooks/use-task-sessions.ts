@@ -1,20 +1,14 @@
 // Frontend facade for task-scoped runtime actions.
 // It owns how the board and detail view start, stop, resize, and route task
-// sessions across native Cline and PTY-backed agents.
+// sessions through PTY-backed local agents.
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback } from "react";
 
 import { notifyError } from "@/components/app-toaster";
-import {
-	type AgentChatActionResult,
-	useAgentChatRuntimeActions,
-} from "@/hooks/use-agent-chat-runtime-actions";
 import { selectNewestTaskSessionSummary } from "@/hooks/home-sidebar-agent-panel-session-summary";
 import { estimateTaskSessionGeometry } from "@/runtime/task-session-geometry";
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type {
-	RuntimeTaskChatMessage,
-	RuntimeTaskSessionMode,
 	RuntimeTaskSessionSummary,
 	RuntimeTaskWorkspaceInfoResponse,
 	RuntimeWorktreeDeleteResponse,
@@ -60,14 +54,6 @@ export interface UseTaskSessionsResult {
 		text: string,
 		options?: SendTerminalInputOptions,
 	) => Promise<SendTaskSessionInputResult>;
-	sendTaskChatMessage: (
-		taskId: string,
-		text: string,
-		options?: { mode?: RuntimeTaskSessionMode },
-	) => Promise<AgentChatActionResult>;
-	abortTaskChatTurn: (taskId: string) => Promise<AgentChatActionResult>;
-	cancelTaskChatTurn: (taskId: string) => Promise<AgentChatActionResult>;
-	fetchTaskChatMessages: (taskId: string) => Promise<RuntimeTaskChatMessage[] | null>;
 	cleanupTaskWorkspace: (taskId: string) => Promise<RuntimeWorktreeDeleteResponse | null>;
 	fetchTaskWorkspaceInfo: (task: BoardCard) => Promise<RuntimeTaskWorkspaceInfoResponse | null>;
 }
@@ -113,15 +99,6 @@ export function useTaskSessions({
 		},
 		[setSessions],
 	);
-	const {
-		sendTaskChatMessage,
-		loadTaskChatMessages: fetchTaskChatMessages,
-		abortTaskChatTurn,
-		cancelTaskChatTurn,
-	} = useAgentChatRuntimeActions({
-		currentProjectId,
-		onSessionSummary: upsertSession,
-	});
 
 	const ensureTaskWorkspace = useCallback(
 		async (task: BoardCard): Promise<EnsureTaskWorkspaceResult> => {
@@ -289,10 +266,6 @@ export function useTaskSessions({
 		startTaskSession,
 		stopTaskSession,
 		sendTaskSessionInput,
-		sendTaskChatMessage,
-		abortTaskChatTurn,
-		cancelTaskChatTurn,
-		fetchTaskChatMessages,
 		cleanupTaskWorkspace,
 		fetchTaskWorkspaceInfo,
 	};

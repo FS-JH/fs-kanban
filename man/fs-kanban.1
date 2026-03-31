@@ -1,4 +1,4 @@
-.TH FS-KANBAN 1 "March 2026" "fs-kanban 0.1.48" "User Commands"
+.TH FS-KANBAN 1 "March 2026" "fs-kanban 2.0.0" "User Commands"
 .SH NAME
 fs-kanban \- local orchestration board for coding agents
 .SH SYNOPSIS
@@ -12,10 +12,8 @@ fs-kanban \- local orchestration board for coding agents
 .RI " " [ options ]
 .br
 .B fs-kanban hooks
-.RI " " ingest|notify|gemini-hook|codex-wrapper
+.RI " " ingest|notify|codex-wrapper
 .RI " " [ options ]
-.br
-.B fs-kanban mcp
 .SH DESCRIPTION
 .B fs-kanban
 starts the local Kanban runtime server and serves the web UI.
@@ -109,16 +107,10 @@ same options as
 .BR ingest ,
 but best-effort.
 .br
-.B gemini-hook
-.br
 .B codex-wrapper
 .B --real-binary
 .RI " " path
 .RI [ agentArgs... ]
-
-.TP
-.B mcp
-Deprecated compatibility command. Prints a deprecation warning and exits.
 .SH EXAMPLES
 .TP
 Start server on the default port:

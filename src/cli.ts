@@ -3,7 +3,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
-import { Command, Option } from "commander";
+import { Command } from "commander";
 import packageJson from "../package.json" with { type: "json" };
 
 import { registerHooksCommand } from "./commands/hooks.js";
@@ -64,12 +64,12 @@ interface RootCommandOptions {
  * Decide whether this CLI invocation should auto-open a browser tab.
  *
  * This uses a positive allowlist for app-launch shapes like `kanban`,
- * `kanban --agent codex`, and `kanban --port 3484`. Any subcommand or
+ * `kanban --host 127.0.0.1`, and `kanban --port 3484`. Any subcommand or
  * unexpected argument is treated as a command-style invocation instead.
  */
 function shouldAutoOpenBrowserTabForInvocation(argv: string[]): boolean {
 	const launchFlags = new Set(["--open", "--no-open", "--skip-shutdown-cleanup"]);
-	const launchOptionsWithValues = new Set(["--host", "--port", "--agent"]);
+	const launchOptionsWithValues = new Set(["--host", "--port"]);
 
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -500,17 +500,8 @@ function createProgram(invocationArgs: string[]): Command {
 		.showHelpAfterError()
 		.addHelpText("after", `\nRuntime URL: ${getKanbanRuntimeOrigin()}`);
 
-	program.addOption(new Option("--agent <id>", "Deprecated compatibility flag. Ignored.").hideHelp());
-
 	registerTaskCommand(program);
 	registerHooksCommand(program);
-
-	program
-		.command("mcp")
-		.description("Deprecated compatibility command.")
-		.action(() => {
-			console.warn("Deprecated. Please uninstall the legacy Kanban MCP bridge.");
-		});
 
 	program.action(async (options: RootCommandOptions) => {
 		await runMainCommand(

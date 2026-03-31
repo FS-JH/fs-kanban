@@ -4,11 +4,6 @@ import { join } from "node:path";
 import packageJson from "../../package.json" with { type: "json" };
 
 import { createHTTPHandler } from "@trpc/server/adapters/standalone";
-import { handleRuntimeMcpOauthCallback } from "../cline-sdk/cline-mcp-runtime-service.js";
-import {
-	type TaskSessionService,
-	createInMemoryTaskSessionService,
-} from "../cline-sdk/cline-task-session-service.js";
 import type { RuntimeCommandRunResponse, RuntimeWorkspaceStateResponse } from "../core/api-contract.js";
 import {
 	buildKanbanRuntimeUrl,
@@ -120,35 +115,9 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 
 	const getScopedTerminalManager = async (scope: RuntimeTrpcWorkspaceScope): Promise<TerminalSessionManager> =>
 		await deps.ensureTerminalManagerForWorkspace(scope.workspaceId, scope.workspacePath);
-	const taskSessionServiceByWorkspaceId = new Map<string, TaskSessionService>();
-	const getScopedTaskSessionService = async (
-		scope: RuntimeTrpcWorkspaceScope,
-	): Promise<TaskSessionService> => {
-		let service = taskSessionServiceByWorkspaceId.get(scope.workspaceId);
-		if (!service) {
-			service = createInMemoryTaskSessionService();
-			taskSessionServiceByWorkspaceId.set(scope.workspaceId, service);
-			deps.runtimeStateHub.trackTaskSessionService(scope.workspaceId, scope.workspacePath, service);
-		}
-		return service;
-	};
-	const disposeTaskSessionServiceAsync = async (workspaceId: string): Promise<void> => {
-		const service = taskSessionServiceByWorkspaceId.get(workspaceId);
-		if (!service) {
-			return;
-		}
-		taskSessionServiceByWorkspaceId.delete(workspaceId);
-		await service.dispose();
-	};
-	const disposeTaskSessionService = (workspaceId: string): void => {
-		void disposeTaskSessionServiceAsync(workspaceId);
-	};
 	const prepareForStateReset = async (): Promise<void> => {
 		const workspaceIds = new Set<string>();
 		for (const { workspaceId } of deps.workspaceRegistry.listManagedWorkspaces()) {
-			workspaceIds.add(workspaceId);
-		}
-		for (const workspaceId of taskSessionServiceByWorkspaceId.keys()) {
 			workspaceIds.add(workspaceId);
 		}
 		const activeWorkspaceId = deps.workspaceRegistry.getActiveWorkspaceId();
@@ -156,7 +125,6 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 			workspaceIds.add(activeWorkspaceId);
 		}
 		for (const workspaceId of workspaceIds) {
-			await disposeTaskSessionServiceAsync(workspaceId);
 			deps.disposeWorkspace(workspaceId, {
 				stopTerminalSessions: true,
 			});
@@ -174,18 +142,14 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 				getActiveWorkspaceId: deps.workspaceRegistry.getActiveWorkspaceId,
 				getActiveRuntimeConfig: deps.workspaceRegistry.getActiveRuntimeConfig,
 				loadScopedRuntimeConfig: deps.workspaceRegistry.loadScopedRuntimeConfig,
-					setActiveRuntimeConfig: deps.workspaceRegistry.setActiveRuntimeConfig,
-					getScopedTerminalManager,
-					getScopedTaskSessionService,
-					resolveInteractiveShellCommand: deps.resolveInteractiveShellCommand,
-					runCommand: deps.runCommand,
-					broadcastMcpAuthStatusesUpdated: deps.runtimeStateHub.broadcastMcpAuthStatusesUpdated,
-					bumpSessionContextVersion: deps.runtimeStateHub.bumpSessionContextVersion,
-					prepareForStateReset,
-				}),
+				setActiveRuntimeConfig: deps.workspaceRegistry.setActiveRuntimeConfig,
+				getScopedTerminalManager,
+				resolveInteractiveShellCommand: deps.resolveInteractiveShellCommand,
+				runCommand: deps.runCommand,
+				prepareForStateReset,
+			}),
 			workspaceApi: createWorkspaceApi({
 				ensureTerminalManagerForWorkspace: deps.ensureTerminalManagerForWorkspace,
-				getScopedTaskSessionService,
 				broadcastRuntimeWorkspaceStateUpdated: deps.runtimeStateHub.broadcastRuntimeWorkspaceStateUpdated,
 				broadcastRuntimeProjectsUpdated: deps.runtimeStateHub.broadcastRuntimeProjectsUpdated,
 				buildWorkspaceStateSnapshot: deps.workspaceRegistry.buildWorkspaceStateSnapshot,
@@ -203,10 +167,7 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 				createProjectSummary: deps.workspaceRegistry.createProjectSummary,
 				broadcastRuntimeProjectsUpdated: deps.runtimeStateHub.broadcastRuntimeProjectsUpdated,
 				getTerminalManagerForWorkspace: deps.workspaceRegistry.getTerminalManagerForWorkspace,
-				disposeWorkspace: (workspaceId, options) => {
-					disposeTaskSessionService(workspaceId);
-					return deps.disposeWorkspace(workspaceId, options);
-				},
+				disposeWorkspace: deps.disposeWorkspace,
 				collectProjectWorktreeTaskIdsForRemoval: deps.collectProjectWorktreeTaskIdsForRemoval,
 				warn: deps.warn,
 				buildProjectsPayload: deps.workspaceRegistry.buildProjectsPayload,
@@ -231,15 +192,6 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 		try {
 			const requestUrl = new URL(req.url ?? "/", "http://localhost");
 			const pathname = normalizeRequestPath(requestUrl.pathname);
-			const oauthCallbackResponse = await handleRuntimeMcpOauthCallback(requestUrl);
-			if (oauthCallbackResponse) {
-				res.writeHead(oauthCallbackResponse.statusCode, {
-					"Content-Type": "text/html; charset=utf-8",
-					"Cache-Control": "no-store",
-				});
-				res.end(oauthCallbackResponse.body);
-				return;
-			}
 			if (pathname.startsWith("/api/trpc")) {
 				await trpcHttpHandler(req, res);
 				return;
@@ -324,12 +276,6 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 	return {
 		url,
 		close: async () => {
-			await Promise.all(
-				Array.from(taskSessionServiceByWorkspaceId.values()).map(async (service) => {
-					await service.dispose();
-				}),
-			);
-			taskSessionServiceByWorkspaceId.clear();
 			await deps.runtimeStateHub.close();
 			await terminalWebSocketBridge.close();
 			await new Promise<void>((resolveClose, rejectClose) => {

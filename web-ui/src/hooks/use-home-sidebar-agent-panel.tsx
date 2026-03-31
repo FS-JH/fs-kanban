@@ -1,23 +1,15 @@
 // Composes the sidebar agent surface for the current workspace.
-// It decides whether the synthetic home session should render native Cline
-// chat or a terminal panel and wires that surface to shared runtime actions.
+// The home agent is always rendered as a terminal-backed local CLI session.
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { AgentTerminalPanel } from "@/components/detail-panels/agent-terminal-panel";
-import { AgentChatPanel } from "@/components/detail-panels/agent-chat-panel";
 import { Spinner } from "@/components/ui/spinner";
 import { selectNewestTaskSessionSummary } from "@/hooks/home-sidebar-agent-panel-session-summary";
-import { createIdleTaskSession } from "@/hooks/app-utils";
-import { useAgentChatRuntimeActions } from "@/hooks/use-agent-chat-runtime-actions";
 import { useHomeAgentSession } from "@/hooks/use-home-agent-session";
-import { selectLatestTaskChatMessageForTask } from "@/runtime/native-agent";
-import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type {
 	RuntimeConfigResponse,
 	RuntimeGitRepositoryInfo,
-	RuntimeStateStreamTaskChatMessage,
-	RuntimeTaskChatMessage,
 	RuntimeTaskSessionSummary,
 } from "@/runtime/types";
 import { TERMINAL_THEME_COLORS } from "@/terminal/theme-colors";
@@ -26,32 +18,16 @@ interface UseHomeSidebarAgentPanelInput {
 	currentProjectId: string | null;
 	hasNoProjects: boolean;
 	runtimeProjectConfig: RuntimeConfigResponse | null;
-	clineSessionContextVersion: number;
 	taskSessions: Record<string, RuntimeTaskSessionSummary>;
 	workspaceGit: RuntimeGitRepositoryInfo | null;
-	latestTaskChatMessage: RuntimeStateStreamTaskChatMessage | null;
-	taskChatMessagesByTaskId: Record<string, RuntimeTaskChatMessage[]>;
-}
-
-async function stopHomeSidebarTaskSession(workspaceId: string, taskId: string): Promise<void> {
-	try {
-		await getRuntimeTrpcClient(workspaceId).runtime.stopTaskSession.mutate({
-			taskId,
-		});
-	} catch {
-		// Ignore stop errors during stale-session cleanup.
-	}
 }
 
 export function useHomeSidebarAgentPanel({
 	currentProjectId,
 	hasNoProjects,
 	runtimeProjectConfig,
-	clineSessionContextVersion,
 	taskSessions,
 	workspaceGit,
-	latestTaskChatMessage,
-	taskChatMessagesByTaskId,
 }: UseHomeSidebarAgentPanelInput): ReactElement | null {
 	const [sessionSummaries, setSessionSummaries] = useState<Record<string, RuntimeTaskSessionSummary>>({});
 	const upsertSessionSummary = useCallback((summary: RuntimeTaskSessionSummary) => {
@@ -67,6 +43,7 @@ export function useHomeSidebarAgentPanel({
 			};
 		});
 	}, []);
+
 	const effectiveSessionSummaries = useMemo(() => {
 		const mergedSessionSummaries = { ...taskSessions };
 		for (const [taskId, summary] of Object.entries(sessionSummaries)) {
@@ -77,27 +54,14 @@ export function useHomeSidebarAgentPanel({
 		}
 		return mergedSessionSummaries;
 	}, [sessionSummaries, taskSessions]);
-	const { panelMode, taskId } = useHomeAgentSession({
+
+	const { taskId } = useHomeAgentSession({
 		currentProjectId,
 		runtimeProjectConfig,
 		workspaceGit,
-		clineSessionContextVersion,
 		sessionSummaries: effectiveSessionSummaries,
 		setSessionSummaries,
 		upsertSessionSummary,
-	});
-	const currentTaskIdRef = useRef<string | null>(null);
-
-	useEffect(() => {
-		currentTaskIdRef.current = taskId;
-	}, [taskId]);
-	const {
-		sendTaskChatMessage,
-		loadTaskChatMessages,
-		cancelTaskChatTurn,
-	} = useAgentChatRuntimeActions({
-		currentProjectId,
-		onSessionSummary: upsertSessionSummary,
 	});
 
 	const selectedAgentLabel = useMemo(() => {
@@ -111,34 +75,6 @@ export function useHomeSidebarAgentPanel({
 	}, [runtimeProjectConfig]);
 
 	const homeAgentPanelSummary = taskId ? (effectiveSessionSummaries[taskId] ?? null) : null;
-	const homeTaskChatMessages = taskId ? (taskChatMessagesByTaskId[taskId] ?? []) : [];
-	const latestHomeTaskChatMessage = selectLatestTaskChatMessageForTask(taskId, latestTaskChatMessage);
-
-	const handleSendHomeAgentChatMessage = useCallback(
-		async (messageTaskId: string, text: string, options?: { mode?: "act" | "plan" }) => {
-			const result = await sendTaskChatMessage(messageTaskId, text, options);
-			if (!result.ok) {
-				return result;
-			}
-			if (currentProjectId) {
-				if (currentTaskIdRef.current !== messageTaskId) {
-					await stopHomeSidebarTaskSession(currentProjectId, messageTaskId);
-				}
-			}
-			return result;
-		},
-		[currentProjectId, sendTaskChatMessage],
-	);
-
-	const handleLoadHomeAgentChatMessages = useCallback(
-		async (messageTaskId: string) => await loadTaskChatMessages(messageTaskId),
-		[loadTaskChatMessages],
-	);
-
-	const handleCancelHomeAgentChatTurn = useCallback(
-		async (messageTaskId: string) => await cancelTaskChatTurn(messageTaskId),
-		[cancelTaskChatTurn],
-	);
 
 	if (hasNoProjects || !currentProjectId) {
 		return null;
@@ -152,28 +88,7 @@ export function useHomeSidebarAgentPanel({
 		);
 	}
 
-	if (panelMode === "chat" && taskId) {
-		return (
-			<AgentChatPanel
-				key={taskId}
-				taskId={taskId}
-				summary={homeAgentPanelSummary ?? createIdleTaskSession(taskId)}
-				defaultMode="act"
-				showComposerModeToggle={false}
-				workspaceId={currentProjectId}
-				runtimeConfig={runtimeProjectConfig}
-				onSendMessage={handleSendHomeAgentChatMessage}
-				onCancelTurn={handleCancelHomeAgentChatTurn}
-				onLoadMessages={handleLoadHomeAgentChatMessages}
-				incomingMessage={latestHomeTaskChatMessage}
-				incomingMessages={homeTaskChatMessages}
-				showRightBorder={false}
-				composerPlaceholder="Ask the agent to add, edit, start, or link tasks"
-			/>
-		);
-	}
-
-	if (panelMode === "terminal" && taskId) {
+	if (taskId) {
 		return (
 			<AgentTerminalPanel
 				key={taskId}

@@ -1,48 +1,7 @@
 import type {
-	RuntimeAgentId,
-	RuntimeClineProviderSettings,
 	RuntimeConfigResponse,
-	RuntimeStateStreamTaskChatMessage,
-	RuntimeTaskChatMessage,
 } from "@/runtime/types";
 import { isRuntimeAgentLaunchSupported } from "@runtime-agent-catalog";
-
-export function isNativeTaskAgentSelected(agentId: RuntimeAgentId | null | undefined): boolean {
-	return agentId === "cline";
-}
-
-export function getRuntimeAgentProviderSettings(
-	config: Pick<RuntimeConfigResponse, "clineProviderSettings"> | null | undefined,
-): RuntimeClineProviderSettings {
-	return (
-		config?.clineProviderSettings ?? {
-			providerId: null,
-			modelId: null,
-			baseUrl: null,
-			reasoningEffort: null,
-			apiKeyConfigured: false,
-			oauthProvider: null,
-			oauthAccessTokenConfigured: false,
-			oauthRefreshTokenConfigured: false,
-			oauthAccountId: null,
-			oauthExpiresAt: null,
-		}
-	);
-}
-
-export function isAgentProviderAuthenticated(
-	settings: RuntimeClineProviderSettings | null | undefined,
-): boolean {
-	if (!settings) {
-		return false;
-	}
-	const hasProviderSelection =
-		(settings.providerId?.trim().length ?? 0) > 0 || (settings.oauthProvider?.trim().length ?? 0) > 0;
-	if (!hasProviderSelection) {
-		return false;
-	}
-	return settings.apiKeyConfigured || settings.oauthAccessTokenConfigured;
-}
 
 export function isTaskAgentSetupSatisfied(
 	config: Pick<RuntimeConfigResponse, "agents"> | null | undefined,
@@ -67,24 +26,4 @@ export function getTaskAgentNavbarHint(
 		return undefined;
 	}
 	return "No agent configured";
-}
-
-export function selectLatestTaskChatMessageForTask(
-	taskId: string | null | undefined,
-	latestTaskChatMessage: RuntimeStateStreamTaskChatMessage | null,
-): RuntimeTaskChatMessage | null {
-	if (!taskId || !latestTaskChatMessage || latestTaskChatMessage.taskId !== taskId) {
-		return null;
-	}
-	return latestTaskChatMessage.message;
-}
-
-export function selectTaskChatMessagesForTask(
-	taskId: string | null | undefined,
-	taskChatMessagesByTaskId: Record<string, RuntimeTaskChatMessage[]>,
-): RuntimeTaskChatMessage[] {
-	if (!taskId) {
-		return [];
-	}
-	return taskChatMessagesByTaskId[taskId] ?? [];
 }

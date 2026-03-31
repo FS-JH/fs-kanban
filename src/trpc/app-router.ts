@@ -10,21 +10,6 @@ import type {
 	RuntimeCommandRunResponse,
 	RuntimeConfigResponse,
 	RuntimeConfigSaveRequest,
-	RuntimeClineOauthLoginRequest,
-	RuntimeClineOauthLoginResponse,
-	RuntimeClineAccountProfileResponse,
-	RuntimeClineKanbanAccessResponse,
-	RuntimeClineMcpAuthStatusResponse,
-	RuntimeClineMcpOAuthRequest,
-	RuntimeClineMcpOAuthResponse,
-	RuntimeClineMcpSettingsResponse,
-	RuntimeClineMcpSettingsSaveRequest,
-	RuntimeClineMcpSettingsSaveResponse,
-	RuntimeClineProviderCatalogResponse,
-	RuntimeClineProviderModelsRequest,
-	RuntimeClineProviderModelsResponse,
-	RuntimeClineProviderSettingsSaveRequest,
-	RuntimeClineProviderSettingsSaveResponse,
 	RuntimeDebugResetAllStateResponse,
 	RuntimeOpenFileRequest,
 	RuntimeOpenFileResponse,
@@ -50,16 +35,6 @@ import type {
 	RuntimeSlashCommandsResponse,
 	RuntimeShellSessionStartRequest,
 	RuntimeShellSessionStartResponse,
-	RuntimeTaskChatMessagesRequest,
-	RuntimeTaskChatMessagesResponse,
-	RuntimeTaskChatAbortRequest,
-	RuntimeTaskChatAbortResponse,
-	RuntimeTaskChatReloadRequest,
-	RuntimeTaskChatReloadResponse,
-	RuntimeTaskChatCancelRequest,
-	RuntimeTaskChatCancelResponse,
-	RuntimeTaskChatSendRequest,
-	RuntimeTaskChatSendResponse,
 	RuntimeTaskSessionInputRequest,
 	RuntimeTaskSessionInputResponse,
 	RuntimeTaskSessionStartRequest,
@@ -85,21 +60,6 @@ import {
 	runtimeCommandRunResponseSchema,
 	runtimeConfigResponseSchema,
 	runtimeConfigSaveRequestSchema,
-	runtimeClineOauthLoginRequestSchema,
-	runtimeClineOauthLoginResponseSchema,
-	runtimeClineAccountProfileResponseSchema,
-	runtimeClineKanbanAccessResponseSchema,
-	runtimeClineMcpAuthStatusResponseSchema,
-	runtimeClineMcpOAuthRequestSchema,
-	runtimeClineMcpOAuthResponseSchema,
-	runtimeClineMcpSettingsResponseSchema,
-	runtimeClineMcpSettingsSaveRequestSchema,
-	runtimeClineMcpSettingsSaveResponseSchema,
-	runtimeClineProviderCatalogResponseSchema,
-	runtimeClineProviderModelsRequestSchema,
-	runtimeClineProviderModelsResponseSchema,
-	runtimeClineProviderSettingsSaveRequestSchema,
-	runtimeClineProviderSettingsSaveResponseSchema,
 	runtimeDebugResetAllStateResponseSchema,
 	runtimeOpenFileRequestSchema,
 	runtimeOpenFileResponseSchema,
@@ -125,16 +85,6 @@ import {
 	runtimeSlashCommandsResponseSchema,
 	runtimeShellSessionStartRequestSchema,
 	runtimeShellSessionStartResponseSchema,
-	runtimeTaskChatMessagesRequestSchema,
-	runtimeTaskChatMessagesResponseSchema,
-	runtimeTaskChatAbortRequestSchema,
-	runtimeTaskChatAbortResponseSchema,
-	runtimeTaskChatReloadRequestSchema,
-	runtimeTaskChatReloadResponseSchema,
-	runtimeTaskChatCancelRequestSchema,
-	runtimeTaskChatCancelResponseSchema,
-	runtimeTaskChatSendRequestSchema,
-	runtimeTaskChatSendResponseSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionInputResponseSchema,
 	runtimeTaskSessionStartRequestSchema,
@@ -170,10 +120,6 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope | null,
 			input: RuntimeConfigSaveRequest,
 		) => Promise<RuntimeConfigResponse>;
-		saveProviderSettings: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineProviderSettingsSaveRequest,
-		) => Promise<RuntimeClineProviderSettingsSaveResponse>;
 		startTaskSession: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskSessionStartRequest,
@@ -186,54 +132,7 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeTaskSessionInputRequest,
 		) => Promise<RuntimeTaskSessionInputResponse>;
-		getTaskChatMessages: (
-			scope: RuntimeTrpcWorkspaceScope,
-			input: RuntimeTaskChatMessagesRequest,
-		) => Promise<RuntimeTaskChatMessagesResponse>;
 		getSlashCommands: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeSlashCommandsResponse>;
-		sendTaskChatMessage: (
-			scope: RuntimeTrpcWorkspaceScope,
-			input: RuntimeTaskChatSendRequest,
-		) => Promise<RuntimeTaskChatSendResponse>;
-		reloadTaskChatSession: (
-			scope: RuntimeTrpcWorkspaceScope,
-			input: RuntimeTaskChatReloadRequest,
-		) => Promise<RuntimeTaskChatReloadResponse>;
-		abortTaskChatTurn: (
-			scope: RuntimeTrpcWorkspaceScope,
-			input: RuntimeTaskChatAbortRequest,
-		) => Promise<RuntimeTaskChatAbortResponse>;
-		cancelTaskChatTurn: (
-			scope: RuntimeTrpcWorkspaceScope,
-			input: RuntimeTaskChatCancelRequest,
-		) => Promise<RuntimeTaskChatCancelResponse>;
-		getProviderCatalog: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineProviderCatalogResponse>;
-		getAccountProfile: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-		) => Promise<RuntimeClineAccountProfileResponse>;
-		getKanbanAccess: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-		) => Promise<RuntimeClineKanbanAccessResponse>;
-		getProviderModels: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineProviderModelsRequest,
-		) => Promise<RuntimeClineProviderModelsResponse>;
-		runProviderOAuthLogin: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineOauthLoginRequest,
-		) => Promise<RuntimeClineOauthLoginResponse>;
-		getMcpAuthStatuses: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-		) => Promise<RuntimeClineMcpAuthStatusResponse>;
-		runMcpServerOAuth: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineMcpOAuthRequest,
-		) => Promise<RuntimeClineMcpOAuthResponse>;
-		getMcpSettings: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeClineMcpSettingsResponse>;
-		saveMcpSettings: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-			input: RuntimeClineMcpSettingsSaveRequest,
-		) => Promise<RuntimeClineMcpSettingsSaveResponse>;
 		startShellSession: (
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeShellSessionStartRequest,
@@ -383,12 +282,6 @@ export const runtimeAppRouter = t.router({
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.saveConfig(ctx.workspaceScope, input);
 			}),
-		saveProviderSettings: t.procedure
-			.input(runtimeClineProviderSettingsSaveRequestSchema)
-			.output(runtimeClineProviderSettingsSaveResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.saveProviderSettings(ctx.workspaceScope, input);
-			}),
 		startTaskSession: workspaceProcedure
 			.input(runtimeTaskSessionStartRequestSchema)
 			.output(runtimeTaskSessionStartResponseSchema)
@@ -407,88 +300,9 @@ export const runtimeAppRouter = t.router({
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.sendTaskSessionInput(ctx.workspaceScope, input);
 			}),
-		getTaskChatMessages: workspaceProcedure
-			.input(runtimeTaskChatMessagesRequestSchema)
-			.output(runtimeTaskChatMessagesResponseSchema)
-			.query(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.getTaskChatMessages(ctx.workspaceScope, input);
-			}),
 		getSlashCommands: t.procedure.output(runtimeSlashCommandsResponseSchema).query(async ({ ctx }) => {
 			return await ctx.runtimeApi.getSlashCommands(ctx.workspaceScope);
 		}),
-		reloadTaskChatSession: workspaceProcedure
-			.input(runtimeTaskChatReloadRequestSchema)
-			.output(runtimeTaskChatReloadResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.reloadTaskChatSession(ctx.workspaceScope, input);
-			}),
-		sendTaskChatMessage: workspaceProcedure
-			.input(runtimeTaskChatSendRequestSchema)
-			.output(runtimeTaskChatSendResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.sendTaskChatMessage(ctx.workspaceScope, input);
-			}),
-		abortTaskChatTurn: workspaceProcedure
-			.input(runtimeTaskChatAbortRequestSchema)
-			.output(runtimeTaskChatAbortResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.abortTaskChatTurn(ctx.workspaceScope, input);
-			}),
-		cancelTaskChatTurn: workspaceProcedure
-			.input(runtimeTaskChatCancelRequestSchema)
-			.output(runtimeTaskChatCancelResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.cancelTaskChatTurn(ctx.workspaceScope, input);
-			}),
-		getProviderCatalog: t.procedure
-			.output(runtimeClineProviderCatalogResponseSchema)
-			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getProviderCatalog(ctx.workspaceScope);
-			}),
-		getAccountProfile: t.procedure
-			.output(runtimeClineAccountProfileResponseSchema)
-			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getAccountProfile(ctx.workspaceScope);
-			}),
-		getKanbanAccess: t.procedure
-			.output(runtimeClineKanbanAccessResponseSchema)
-			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getKanbanAccess(ctx.workspaceScope);
-			}),
-		getProviderModels: t.procedure
-			.input(runtimeClineProviderModelsRequestSchema)
-			.output(runtimeClineProviderModelsResponseSchema)
-			.query(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.getProviderModels(ctx.workspaceScope, input);
-			}),
-		getMcpAuthStatuses: t.procedure
-			.output(runtimeClineMcpAuthStatusResponseSchema)
-			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getMcpAuthStatuses(ctx.workspaceScope);
-			}),
-		runMcpServerOAuth: t.procedure
-			.input(runtimeClineMcpOAuthRequestSchema)
-			.output(runtimeClineMcpOAuthResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.runMcpServerOAuth(ctx.workspaceScope, input);
-			}),
-		getMcpSettings: t.procedure
-			.output(runtimeClineMcpSettingsResponseSchema)
-			.query(async ({ ctx }) => {
-				return await ctx.runtimeApi.getMcpSettings(ctx.workspaceScope);
-			}),
-		saveMcpSettings: t.procedure
-			.input(runtimeClineMcpSettingsSaveRequestSchema)
-			.output(runtimeClineMcpSettingsSaveResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.saveMcpSettings(ctx.workspaceScope, input);
-			}),
-		runProviderOAuthLogin: t.procedure
-			.input(runtimeClineOauthLoginRequestSchema)
-			.output(runtimeClineOauthLoginResponseSchema)
-			.mutation(async ({ ctx, input }) => {
-				return await ctx.runtimeApi.runProviderOAuthLogin(ctx.workspaceScope, input);
-			}),
 		startShellSession: workspaceProcedure
 			.input(runtimeShellSessionStartRequestSchema)
 			.output(runtimeShellSessionStartResponseSchema)

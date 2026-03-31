@@ -8,9 +8,9 @@ function createSummary(
 	updatedAt: number,
 ): RuntimeTaskSessionSummary {
 	return {
-		taskId: "__home_agent__:workspace:cline:nonce",
+		taskId: "__home_agent__:workspace:codex",
 		state,
-		agentId: "cline",
+		agentId: "codex",
 		workspacePath: "/tmp/repo",
 		pid: null,
 		startedAt: 1,

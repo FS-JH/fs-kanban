@@ -32,15 +32,15 @@ For direct pushes to `main`:
 Release prep is intentionally manual on the maintainer side:
 
 1. Update `CHANGELOG.md` with a section for the new version.
-2. Bump `package.json` version.
+2. Bump both `package.json` and `web-ui/package.json` versions.
 3. Commit and push those changes.
 4. Create and push a matching git tag in the form `vX.Y.Z` (or prerelease like `vX.Y.Z-beta.1`).
 
 Example:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
 Pushing the tag does not publish automatically.
@@ -52,7 +52,7 @@ Before pushing a release tag, verify that `origin` points at the FS Kanban repos
 1. Open Actions in GitHub.
 2. Select `Publish` workflow.
 3. Click `Run workflow`.
-4. Enter the tag you already pushed, for example `v0.2.0`.
+4. Enter the tag you already pushed, for example `v2.0.0`.
 5. Run the workflow.
 
 ## What publish.yml does

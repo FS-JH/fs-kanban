@@ -441,7 +441,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			rows,
 			terminalProtocolFilter: createTerminalProtocolFilterState({
 				interceptOsc11BackgroundQueries: true,
-				suppressDeviceAttributeQueries: request.agentId === "droid",
+				suppressDeviceAttributeQueries: false,
 			}),
 			onSessionCleanup: launch.cleanup ?? null,
 			detectOutputTransition: launch.detectOutputTransition ?? null,

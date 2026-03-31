@@ -334,9 +334,6 @@ export function inferHookSourceFromPayload(payload: Record<string, unknown> | nu
 	if (normalizedTranscriptPath?.includes("/.claude/")) {
 		return "claude";
 	}
-	if (normalizedTranscriptPath?.includes("/.factory/")) {
-		return "droid";
-	}
 	if (payload && readStringField(payload, "type") === "agent-turn-complete") {
 		return "codex";
 	}
@@ -922,56 +919,6 @@ async function readStdinText(): Promise<string> {
 	return chunks.join("");
 }
 
-function mapGeminiHookEvent(eventName: string): RuntimeHookEvent | null {
-	if (eventName === "AfterAgent") {
-		return "to_review";
-	}
-	if (eventName === "BeforeAgent") {
-		return "to_in_progress";
-	}
-	if (eventName === "AfterTool" || eventName === "BeforeTool" || eventName === "Notification") {
-		return "activity";
-	}
-	return null;
-}
-
-async function runGeminiHookSubcommand(): Promise<void> {
-	let payload = "";
-	try {
-		payload = await readStdinText();
-	} catch {
-		payload = "";
-	}
-
-	let hookEventName = "";
-	let payloadRecord: Record<string, unknown> | null = null;
-	try {
-		const parsed = JSON.parse(payload || "{}") as { hook_event_name?: unknown };
-		payloadRecord = asRecord(parsed);
-		hookEventName =
-			typeof parsed.hook_event_name === "string"
-				? parsed.hook_event_name
-				: payloadRecord && typeof payloadRecord.hookEventName === "string"
-					? payloadRecord.hookEventName
-					: "";
-	} catch {
-		hookEventName = "";
-		payloadRecord = null;
-	}
-
-	process.stdout.write("{}\n");
-
-	const mappedEvent = mapGeminiHookEvent(hookEventName);
-	if (!mappedEvent) {
-		return;
-	}
-	const metadata = normalizeHookMetadata(mappedEvent, payloadRecord, {
-		source: "gemini",
-		hookEventName: hookEventName || undefined,
-	});
-	spawnDetachedKanban(appendMetadataFlags(["hooks", "notify", "--event", mappedEvent], metadata));
-}
-
 export function buildCodexWrapperChildArgs(agentArgs: string[], shouldWatchSessionLog: boolean): string[] {
 	const childArgs = [...agentArgs];
 	if (shouldWatchSessionLog) {
@@ -1134,13 +1081,6 @@ export function registerHooksCommand(program: Command): void {
 				await runHooksNotify(options.event, options, payload);
 			},
 		);
-
-	hooks
-		.command("gemini-hook")
-		.description("Gemini hook entrypoint.")
-		.action(async () => {
-			await runGeminiHookSubcommand();
-		});
 
 	hooks
 		.command("codex-wrapper [agentArgs...]")

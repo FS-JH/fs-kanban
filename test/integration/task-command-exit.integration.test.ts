@@ -375,8 +375,7 @@ describe("source task commands", () => {
 				for (const [args, expectedOpenCount] of [
 					[[], 1],
 					[["task", "list", "--project-path", projectPath], 1],
-					[["--agent", "codex"], 2],
-					[["--port", port], 3],
+					[["--port", port], 2],
 				] as const) {
 					const result = await runCliCommandAndCollectOutput({
 						args: [...args],
@@ -388,6 +387,15 @@ describe("source task commands", () => {
 					await waitForBrowserOpenCount(browserOpenLogPath, expectedOpenCount);
 					expect(readBrowserOpenLog(browserOpenLogPath)).toHaveLength(expectedOpenCount);
 				}
+
+				const deprecatedAgentResult = await runCliCommandAndCollectOutput({
+					args: ["--agent", "codex"],
+					cwd: projectPath,
+					env,
+				});
+				expect(deprecatedAgentResult.didExit).toBe(true);
+				expect(deprecatedAgentResult.exitCode).toBe(1);
+				expect(readBrowserOpenLog(browserOpenLogPath)).toHaveLength(2);
 			} finally {
 				await requestGracefulShutdown(serverProcess);
 				const stopped = await waitForExit(serverProcess, 5_000);

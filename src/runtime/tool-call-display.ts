@@ -1,4 +1,4 @@
-export interface ClineToolCallDisplay {
+export interface ToolCallDisplay {
 	toolName: string;
 	inputSummary: string | null;
 }
@@ -111,7 +111,7 @@ function readInputSummary(input: unknown, toolName: string): string | null {
 	return null;
 }
 
-export function getClineToolCallDisplay(toolName: string, input: unknown): ClineToolCallDisplay {
+export function getToolCallDisplay(toolName: string, input: unknown): ToolCallDisplay {
 	const inputSummary = readInputSummary(input, toolName);
 	return {
 		toolName,
@@ -119,6 +119,6 @@ export function getClineToolCallDisplay(toolName: string, input: unknown): Cline
 	};
 }
 
-export function formatClineToolCallLabel(toolName: string, inputSummary: string | null): string {
+export function formatToolCallLabel(toolName: string, inputSummary: string | null): string {
 	return inputSummary ? `${toolName}: ${inputSummary}` : toolName;
 }
