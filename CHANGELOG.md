@@ -2,6 +2,15 @@
 
 > Historical entries before the FS Kanban fork still reflect upstream branding and implementation details. New FS Kanban work starts with the 0.1.48 fork baseline.
 
+## [2.0.0]
+
+- Removed the remaining native Cline compatibility layer from the runtime, UI contracts, and active tests
+- Narrowed the supported task-agent surface to local Codex and Claude Code sessions only
+- Removed provider catalog, OAuth, MCP settings, task chat, and other dead compatibility APIs from the runtime and web UI
+- Simplified settings and onboarding around local CLI detection, launch commands, shortcuts, and prompt templates
+- Kept the local file-backed persistence model (`board.json`, `sessions.json`, workspace index, turn checkpoints) as the v2 baseline
+- Removed deprecated CLI compatibility entry points that no longer belong to the supported release surface
+
 ## [0.1.48]
 
 - Fixed sidebar agent attempting to edit files and write code instead of staying focused on Kanban board management

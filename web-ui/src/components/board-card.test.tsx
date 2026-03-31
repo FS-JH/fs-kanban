@@ -96,7 +96,7 @@ function createSummary(
 	return {
 		taskId: "task-1",
 		state,
-		agentId: "cline",
+		agentId: "codex",
 		workspacePath: "/tmp/worktree",
 		pid: null,
 		startedAt: 1,
@@ -272,7 +272,7 @@ describe("BoardCard", () => {
 						sessionSummary={{
 							taskId: "task-1",
 							state: "running",
-						agentId: "cline",
+						agentId: "codex",
 						workspacePath: "/tmp/worktree",
 						pid: null,
 						startedAt: Date.now(),
@@ -288,7 +288,7 @@ describe("BoardCard", () => {
 							finalMessage: null,
 							hookEventName: "tool_call",
 							notificationType: null,
-							source: "cline-sdk",
+							source: "codex",
 						},
 						latestTurnCheckpoint: null,
 						previousTurnCheckpoint: null,
@@ -301,7 +301,7 @@ describe("BoardCard", () => {
 		expect(container.textContent).not.toContain("Using Read");
 	});
 
-	it("shows non-cline tool activity in the compact tool label format", async () => {
+it("shows local-agent tool activity in the compact tool label format", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
@@ -355,7 +355,7 @@ describe("BoardCard", () => {
 		expect(container.textContent).not.toContain("Calling Read");
 	});
 
-	it("keeps showing the last cline tool label during assistant streaming", async () => {
+it("keeps showing the last tool label during assistant streaming", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
@@ -365,7 +365,7 @@ describe("BoardCard", () => {
 					sessionSummary={{
 						taskId: "task-1",
 						state: "running",
-						agentId: "cline",
+						agentId: "codex",
 						workspacePath: "/tmp/worktree",
 						pid: null,
 						startedAt: Date.now(),
@@ -381,7 +381,7 @@ describe("BoardCard", () => {
 								finalMessage: "Looking at the file now",
 								hookEventName: "assistant_delta",
 								notificationType: null,
-								source: "cline-sdk",
+								source: "codex",
 						},
 						latestTurnCheckpoint: null,
 						previousTurnCheckpoint: null,
@@ -430,7 +430,7 @@ describe("BoardCard", () => {
 								finalMessage: preview,
 								hookEventName: "assistant_delta",
 								notificationType: null,
-								source: "cline-sdk",
+								source: "codex",
 							},
 						})}
 					/>
@@ -485,7 +485,7 @@ describe("BoardCard", () => {
 							finalMessage: preview,
 							hookEventName: "assistant_delta",
 							notificationType: null,
-							source: "cline-sdk",
+							source: "codex",
 						},
 					})}
 				/>,
@@ -535,7 +535,7 @@ describe("BoardCard", () => {
 								finalMessage: "Reviewing the final diff",
 								hookEventName: "assistant_delta",
 								notificationType: null,
-							source: "cline-sdk",
+							source: "codex",
 						},
 					})}
 				/>,

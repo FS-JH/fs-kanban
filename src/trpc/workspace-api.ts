@@ -6,7 +6,6 @@ import type {
 	RuntimeGitSummaryResponse,
 	RuntimeGitSyncAction,
 	RuntimeGitSyncResponse,
-	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceChangesMode,
 	RuntimeWorkspaceFileSearchResponse,
 	RuntimeWorkspaceStateResponse,
@@ -18,7 +17,6 @@ import {
 } from "../core/api-validation.js";
 import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
-import type { TaskSessionService } from "../cline-sdk/cline-task-session-service.js";
 import {
 	createEmptyWorkspaceChangesResponse,
 	getWorkspaceChanges,
@@ -38,14 +36,6 @@ import type { RuntimeTrpcContext } from "./app-router.js";
 
 export interface CreateWorkspaceApiDependencies {
 	ensureTerminalManagerForWorkspace: (workspaceId: string, repoPath: string) => Promise<TerminalSessionManager>;
-	getScopedTaskSessionService?: (scope: {
-		workspaceId: string;
-		workspacePath: string;
-	}) => Promise<TaskSessionService>;
-	getScopedClineTaskSessionService?: (scope: {
-		workspaceId: string;
-		workspacePath: string;
-	}) => Promise<TaskSessionService>;
 	broadcastRuntimeWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void> | void;
 	broadcastRuntimeProjectsUpdated: (preferredCurrentProjectId: string | null) => Promise<void> | void;
 	buildWorkspaceStateSnapshot: (workspaceId: string, workspacePath: string) => Promise<RuntimeWorkspaceStateResponse>;
@@ -91,31 +81,6 @@ function normalizeRequiredTaskWorkspaceScopeInput(input: {
 		baseRef,
 		mode,
 	};
-}
-
-function isActiveTaskSessionState(summary: RuntimeTaskSessionSummary | null): boolean {
-	return summary?.state === "running" || summary?.state === "awaiting_review";
-}
-
-function selectLastTurnSummary(
-	terminalSummary: RuntimeTaskSessionSummary | null,
-	taskSummary: RuntimeTaskSessionSummary | null,
-): RuntimeTaskSessionSummary | null {
-	if (!terminalSummary) {
-		return taskSummary;
-	}
-	if (!taskSummary) {
-		return terminalSummary;
-	}
-	const terminalIsActive = isActiveTaskSessionState(terminalSummary);
-	const taskIsActive = isActiveTaskSessionState(taskSummary);
-	if (terminalIsActive !== taskIsActive) {
-		return taskIsActive ? taskSummary : terminalSummary;
-	}
-	if (terminalSummary.updatedAt !== taskSummary.updatedAt) {
-		return terminalSummary.updatedAt > taskSummary.updatedAt ? terminalSummary : taskSummary;
-	}
-	return terminalSummary;
 }
 
 function createEmptyGitSummaryErrorResponse(error: unknown): RuntimeGitSummaryResponse {
@@ -192,16 +157,6 @@ function createEmptyGitDiscardErrorResponse(error: unknown): RuntimeGitDiscardRe
 }
 
 export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): RuntimeTrpcContext["workspaceApi"] {
-	const getTaskSessionService = async (workspaceScope: {
-		workspaceId: string;
-		workspacePath: string;
-	}): Promise<TaskSessionService> => {
-		const service = deps.getScopedTaskSessionService ?? deps.getScopedClineTaskSessionService;
-		if (!service) {
-			throw new Error("No task session service is available.");
-		}
-		return await service(workspaceScope);
-	};
 	return {
 		loadGitSummary: async (workspaceScope, input) => {
 			try {
@@ -291,11 +246,7 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 					workspaceScope.workspaceId,
 					workspaceScope.workspacePath,
 				);
-				const taskSessionService = await getTaskSessionService(workspaceScope);
-				const summary = selectLastTurnSummary(
-					terminalManager.getSummary(normalizedInput.taskId),
-					taskSessionService.getSummary(normalizedInput.taskId),
-				);
+				const summary = terminalManager.getSummary(normalizedInput.taskId);
 				const fromCheckpoint = summary?.previousTurnCheckpoint;
 				const toCheckpoint = summary?.latestTurnCheckpoint;
 				if (!toCheckpoint) {

@@ -4,6 +4,7 @@ import type {
 	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceChangesResponse,
 } from "../../../src/core/api-contract.js";
+import { createWorkspaceApi } from "../../../src/trpc/workspace-api.js";
 
 const workspaceTaskWorktreeMocks = vi.hoisted(() => ({
 	resolveTaskCwd: vi.fn(),
@@ -30,12 +31,11 @@ vi.mock("../../../src/workspace/get-workspace-changes.js", () => ({
 	getWorkspaceChangesFromRef: workspaceChangesMocks.getWorkspaceChangesFromRef,
 }));
 
-import { createWorkspaceApi } from "../../../src/trpc/workspace-api.js";
-
 function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
 	return {
 		taskId: "task-1",
 		state: "running",
+		mode: "act",
 		agentId: "claude",
 		workspacePath: "/tmp/worktree",
 		pid: 1234,
@@ -46,6 +46,7 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 		exitCode: null,
 		lastHookAt: null,
 		latestHookActivity: null,
+		warningMessage: null,
 		latestTurnCheckpoint: null,
 		previousTurnCheckpoint: null,
 		...overrides,
@@ -94,26 +95,19 @@ describe("createWorkspaceApi loadChanges", () => {
 					},
 				}),
 			),
+			listSummaries: vi.fn(() => []),
 		};
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedTaskSessionService: vi.fn(async () => ({ getSummary: vi.fn(() => null) }) as never),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
 		});
 
 		await api.loadChanges(
-			{
-				workspaceId: "workspace-1",
-				workspacePath: "/tmp/repo",
-			},
-			{
-				taskId: "task-1",
-				baseRef: "main",
-				mode: "last_turn",
-			},
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", baseRef: "main", mode: "last_turn" },
 		);
 
 		expect(workspaceChangesMocks.getWorkspaceChangesBetweenRefs).toHaveBeenCalledWith({
@@ -143,26 +137,19 @@ describe("createWorkspaceApi loadChanges", () => {
 					},
 				}),
 			),
+			listSummaries: vi.fn(() => []),
 		};
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedTaskSessionService: vi.fn(async () => ({ getSummary: vi.fn(() => null) }) as never),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
 		});
 
 		await api.loadChanges(
-			{
-				workspaceId: "workspace-1",
-				workspacePath: "/tmp/repo",
-			},
-			{
-				taskId: "task-1",
-				baseRef: "main",
-				mode: "last_turn",
-			},
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", baseRef: "main", mode: "last_turn" },
 		);
 
 		expect(workspaceChangesMocks.getWorkspaceChangesFromRef).toHaveBeenCalledWith({
@@ -172,127 +159,47 @@ describe("createWorkspaceApi loadChanges", () => {
 		expect(workspaceChangesMocks.getWorkspaceChangesBetweenRefs).not.toHaveBeenCalled();
 	});
 
-	it("uses native session checkpoints when terminal summaries are unavailable", async () => {
+	it("returns an empty last-turn diff when no terminal summary is available", async () => {
 		const terminalManager = {
 			getSummary: vi.fn(() => null),
-		};
-		const taskSessionService = {
-			getSummary: vi.fn(() =>
-				createSummary({
-					state: "awaiting_review",
-					latestTurnCheckpoint: {
-						turn: 3,
-						ref: "refs/kanban/checkpoints/task-1/turn/3",
-						commit: "3333333",
-						createdAt: 3,
-					},
-					previousTurnCheckpoint: {
-						turn: 2,
-						ref: "refs/kanban/checkpoints/task-1/turn/2",
-						commit: "2222222",
-						createdAt: 2,
-					},
-				}),
-			),
+			listSummaries: vi.fn(() => []),
 		};
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
 		});
 
 		await api.loadChanges(
-			{
-				workspaceId: "workspace-1",
-				workspacePath: "/tmp/repo",
-			},
-			{
-				taskId: "task-1",
-				baseRef: "main",
-				mode: "last_turn",
-			},
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", baseRef: "main", mode: "last_turn" },
 		);
 
-		expect(taskSessionService.getSummary).toHaveBeenCalledWith("task-1");
-		expect(workspaceChangesMocks.getWorkspaceChangesBetweenRefs).toHaveBeenCalledWith({
-			cwd: "/tmp/worktree",
-			fromRef: "2222222",
-			toRef: "3333333",
-		});
+		expect(workspaceChangesMocks.createEmptyWorkspaceChangesResponse).toHaveBeenCalledWith("/tmp/worktree");
+		expect(workspaceChangesMocks.getWorkspaceChangesBetweenRefs).not.toHaveBeenCalled();
+		expect(workspaceChangesMocks.getWorkspaceChangesFromRef).not.toHaveBeenCalled();
 	});
 
-	it("prefers the newer live summary over a stale terminal summary", async () => {
+	it("loads working copy changes when last-turn mode is not requested", async () => {
 		const terminalManager = {
-			getSummary: vi.fn(() =>
-				createSummary({
-					state: "awaiting_review",
-					agentId: "claude",
-					updatedAt: 10,
-					latestTurnCheckpoint: {
-						turn: 2,
-						ref: "refs/kanban/checkpoints/task-1/turn/2",
-						commit: "terminal-2",
-						createdAt: 2,
-					},
-					previousTurnCheckpoint: {
-						turn: 1,
-						ref: "refs/kanban/checkpoints/task-1/turn/1",
-						commit: "terminal-1",
-						createdAt: 1,
-					},
-				}),
-			),
-		};
-		const taskSessionService = {
-			getSummary: vi.fn(() =>
-				createSummary({
-					state: "awaiting_review",
-					agentId: "cline",
-					updatedAt: 20,
-					latestTurnCheckpoint: {
-						turn: 3,
-						ref: "refs/kanban/checkpoints/task-1/turn/3",
-						commit: "cline-3",
-						createdAt: 3,
-					},
-					previousTurnCheckpoint: {
-						turn: 2,
-						ref: "refs/kanban/checkpoints/task-1/turn/2",
-						commit: "cline-2",
-						createdAt: 2,
-					},
-				}),
-			),
+			getSummary: vi.fn(() => null),
+			listSummaries: vi.fn(() => []),
 		};
 
 		const api = createWorkspaceApi({
 			ensureTerminalManagerForWorkspace: vi.fn(async () => terminalManager as never),
-			getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastRuntimeProjectsUpdated: vi.fn(),
 			buildWorkspaceStateSnapshot: vi.fn(),
 		});
 
 		await api.loadChanges(
-			{
-				workspaceId: "workspace-1",
-				workspacePath: "/tmp/repo",
-			},
-			{
-				taskId: "task-1",
-				baseRef: "main",
-				mode: "last_turn",
-			},
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{ taskId: "task-1", baseRef: "main", mode: "working_copy" },
 		);
 
-		expect(workspaceChangesMocks.getWorkspaceChangesBetweenRefs).toHaveBeenCalledWith({
-			cwd: "/tmp/worktree",
-			fromRef: "cline-2",
-			toRef: "cline-3",
-		});
+		expect(workspaceChangesMocks.getWorkspaceChanges).toHaveBeenCalledWith("/tmp/worktree");
 	});
-
 });

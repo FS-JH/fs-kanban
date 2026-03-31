@@ -1,9 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import type { RuntimeConfigState } from "../../../src/config/runtime-config.js";
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract.js";
+import { createRuntimeApi } from "../../../src/trpc/runtime-api.js";
 
 const agentRegistryMocks = vi.hoisted(() => ({
 	resolveAgentCommand: vi.fn(),
@@ -29,12 +31,11 @@ vi.mock("../../../src/workspace/turn-checkpoints.js", () => ({
 	captureTaskTurnCheckpoint: turnCheckpointMocks.captureTaskTurnCheckpoint,
 }));
 
-import { createRuntimeApi } from "../../../src/trpc/runtime-api.js";
-
 function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
 	return {
 		taskId: "task-1",
 		state: "running",
+		mode: "act",
 		agentId: "codex",
 		workspacePath: "/tmp/worktree",
 		pid: 1234,
@@ -45,6 +46,7 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 		exitCode: null,
 		lastHookAt: null,
 		latestHookActivity: null,
+		warningMessage: null,
 		latestTurnCheckpoint: null,
 		previousTurnCheckpoint: null,
 		...overrides,
@@ -67,26 +69,12 @@ function createRuntimeConfigState(): RuntimeConfigState {
 	};
 }
 
-function createTaskSessionServiceMock() {
+function createTerminalManagerMock() {
 	return {
-		startTaskSession: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary>>(async () =>
-			createSummary({ agentId: "cline", pid: null }),
-		),
-		onMessage: vi.fn<(...args: unknown[]) => () => void>(() => () => {}),
-		stopTaskSession: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
-		abortTaskSession: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
-		cancelTaskTurn: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
-		sendTaskSessionInput: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
-		reloadTaskSession: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(async () => null),
-		rebindPersistedTaskSession: vi.fn<(...args: unknown[]) => Promise<RuntimeTaskSessionSummary | null>>(
-			async () => null,
-		),
-		getSummary: vi.fn<(...args: unknown[]) => RuntimeTaskSessionSummary | null>(() => null),
-		listSummaries: vi.fn<(...args: unknown[]) => RuntimeTaskSessionSummary[]>(() => []),
-		listMessages: vi.fn<(...args: unknown[]) => unknown[]>(() => []),
-		loadTaskSessionMessages: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(async () => []),
-		applyTurnCheckpoint: vi.fn<(...args: unknown[]) => RuntimeTaskSessionSummary | null>(() => null),
-		dispose: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {}),
+		startTaskSession: vi.fn(async () => createSummary()),
+		stopTaskSession: vi.fn(() => null),
+		writeInput: vi.fn(() => null),
+		applyTurnCheckpoint: vi.fn(() => null),
 	};
 }
 
@@ -114,17 +102,12 @@ describe("createRuntimeApi runtime behavior", () => {
 	it("reuses an existing worktree path before falling back to ensure", async () => {
 		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
 
-		const terminalManager = {
-			startTaskSession: vi.fn(async () => createSummary()),
-			applyTurnCheckpoint: vi.fn(),
-		};
-		const taskSessionService = createTaskSessionServiceMock();
+		const terminalManager = createTerminalManagerMock();
 		const api = createRuntimeApi({
 			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
 			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
 			setActiveRuntimeConfig: vi.fn(),
 			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
-			getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
 			resolveInteractiveShellCommand: vi.fn(),
 			runCommand: vi.fn(),
 		});
@@ -157,21 +140,14 @@ describe("createRuntimeApi runtime behavior", () => {
 	});
 
 	it("ensures the worktree when no existing task cwd is available", async () => {
-		taskWorktreeMocks.resolveTaskCwd
-			.mockRejectedValueOnce(new Error("missing"))
-			.mockResolvedValueOnce("/tmp/new-worktree");
+		taskWorktreeMocks.resolveTaskCwd.mockRejectedValueOnce(new Error("missing")).mockResolvedValueOnce("/tmp/new-worktree");
 
-		const terminalManager = {
-			startTaskSession: vi.fn(async () => createSummary()),
-			applyTurnCheckpoint: vi.fn(),
-		};
-		const taskSessionService = createTaskSessionServiceMock();
+		const terminalManager = createTerminalManagerMock();
 		const api = createRuntimeApi({
 			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
 			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
 			setActiveRuntimeConfig: vi.fn(),
 			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
-		getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
 			resolveInteractiveShellCommand: vi.fn(),
 			runCommand: vi.fn(),
 		});
@@ -203,25 +179,16 @@ describe("createRuntimeApi runtime behavior", () => {
 		});
 	});
 
-	it("fails fast when a legacy cline selection is loaded from config", async () => {
+	it("returns a setup error when no runnable local agent command is configured", async () => {
 		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue(null);
 
-		const terminalManager = {
-			startTaskSession: vi.fn(async () => createSummary()),
-			applyTurnCheckpoint: vi.fn(),
-		};
-		const taskSessionService = createTaskSessionServiceMock();
-
+		const terminalManager = createTerminalManagerMock();
 		const api = createRuntimeApi({
 			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
-			loadScopedRuntimeConfig: vi.fn(async () => {
-				const runtimeConfigState = createRuntimeConfigState();
-				runtimeConfigState.selectedAgentId = "cline";
-				return runtimeConfigState;
-			}),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
 			setActiveRuntimeConfig: vi.fn(),
 			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
-		getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
 			resolveInteractiveShellCommand: vi.fn(),
 			runCommand: vi.fn(),
 		});
@@ -235,43 +202,24 @@ describe("createRuntimeApi runtime behavior", () => {
 				taskId: "task-1",
 				baseRef: "main",
 				prompt: "Continue task",
-				images: [
-					{
-						id: "img-1",
-						data: "abc123",
-						mimeType: "image/png",
-					},
-				],
-				startInPlanMode: true,
 			},
 		);
 
 		expect(response.ok).toBe(false);
 		expect(response.summary).toBeNull();
-		expect(response.error).toContain("Native agent support has been removed from FS Kanban");
-		expect(taskWorktreeMocks.resolveTaskCwd).toHaveBeenCalledWith({
-			cwd: "/tmp/repo",
-			taskId: "task-1",
-			baseRef: "main",
-			ensure: false,
-		});
+		expect(response.error).toContain("No runnable agent command is configured");
 		expect(terminalManager.startTaskSession).not.toHaveBeenCalled();
-		expect(taskSessionService.startTaskSession).not.toHaveBeenCalled();
 	});
 
 	it("starts home agent sessions in the workspace root without resolving a task worktree", async () => {
 		const homeTaskId = "__home_agent__:workspace-1:codex:abc123";
-		const terminalManager = {
-			startTaskSession: vi.fn(async () => createSummary({ taskId: homeTaskId })),
-			applyTurnCheckpoint: vi.fn(),
-		};
-		const taskSessionService = createTaskSessionServiceMock();
+		const terminalManager = createTerminalManagerMock();
+		terminalManager.startTaskSession.mockResolvedValue(createSummary({ taskId: homeTaskId }));
 		const api = createRuntimeApi({
 			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
 			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
 			setActiveRuntimeConfig: vi.fn(),
 			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
-		getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
 			resolveInteractiveShellCommand: vi.fn(),
 			runCommand: vi.fn(),
 		});
@@ -299,31 +247,14 @@ describe("createRuntimeApi runtime behavior", () => {
 		expect(turnCheckpointMocks.captureTaskTurnCheckpoint).not.toHaveBeenCalled();
 	});
 
-	it("forwards task images to CLI task sessions", async () => {
+	it("forwards task images to local CLI task sessions", async () => {
 		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
-		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
-			agentId: "codex",
-			label: "OpenAI Codex",
-			command: "codex",
-			binary: "codex",
-			args: [],
-		});
-
-		const terminalManager = {
-			startTaskSession: vi.fn(async () => createSummary({ agentId: "codex" })),
-			applyTurnCheckpoint: vi.fn(),
-		};
-		const taskSessionService = createTaskSessionServiceMock();
+		const terminalManager = createTerminalManagerMock();
 		const api = createRuntimeApi({
 			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
-			loadScopedRuntimeConfig: vi.fn(async () => {
-				const runtimeConfigState = createRuntimeConfigState();
-				runtimeConfigState.selectedAgentId = "codex";
-				return runtimeConfigState;
-			}),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
 			setActiveRuntimeConfig: vi.fn(),
 			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
-			getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
 			resolveInteractiveShellCommand: vi.fn(),
 			runCommand: vi.fn(),
 		});
@@ -357,119 +288,6 @@ describe("createRuntimeApi runtime behavior", () => {
 				images,
 			}),
 		);
-		expect(taskSessionService.startTaskSession).not.toHaveBeenCalled();
-	});
-
-	it("hydrates persisted chat messages when no live in-memory session is loaded", async () => {
-		const persistedMessage = {
-			id: "message-persisted-1",
-			role: "assistant" as const,
-			content: "Recovered from SDK artifacts",
-			createdAt: Date.now(),
-		};
-		const taskSessionService = createTaskSessionServiceMock();
-		taskSessionService.getSummary.mockReturnValue(null);
-		taskSessionService.loadTaskSessionMessages.mockResolvedValue([persistedMessage]);
-
-		const api = createRuntimeApi({
-			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
-			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
-			setActiveRuntimeConfig: vi.fn(),
-			getScopedTerminalManager: vi.fn(async () => ({}) as never),
-		getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
-			resolveInteractiveShellCommand: vi.fn(),
-			runCommand: vi.fn(),
-		});
-
-		const response = await api.getTaskChatMessages(
-			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
-			{ taskId: "task-1" },
-		);
-
-		expect(response.ok).toBe(true);
-		expect(response.messages).toEqual([persistedMessage]);
-		expect(taskSessionService.loadTaskSessionMessages).toHaveBeenCalledWith("task-1");
-	});
-
-	it("reloads a chat session through the task session service", async () => {
-		const summary = createSummary({ agentId: "cline", pid: null });
-		const taskSessionService = createTaskSessionServiceMock();
-		taskSessionService.reloadTaskSession.mockResolvedValue(summary);
-
-		const api = createRuntimeApi({
-			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
-			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
-			setActiveRuntimeConfig: vi.fn(),
-			getScopedTerminalManager: vi.fn(async () => ({}) as never),
-		getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
-			resolveInteractiveShellCommand: vi.fn(),
-			runCommand: vi.fn(),
-		});
-
-		const response = await api.reloadTaskChatSession(
-			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
-			{ taskId: "__home_agent__:workspace-1:cline" },
-		);
-
-		expect(response).toEqual({
-			ok: true,
-			summary,
-		});
-		expect(taskSessionService.reloadTaskSession).toHaveBeenCalledWith("__home_agent__:workspace-1:cline");
-	});
-
-	it("rebinds persisted non-home chat sessions before retrying the first send after restart", async () => {
-		const summary = createSummary({ agentId: "cline", pid: null });
-		const latestMessage = {
-			id: "message-rebound-1",
-			role: "user" as const,
-			content: "continue",
-			createdAt: Date.now(),
-		};
-		const taskSessionService = createTaskSessionServiceMock();
-		taskSessionService.sendTaskSessionInput.mockResolvedValueOnce(null).mockResolvedValueOnce(summary);
-		taskSessionService.rebindPersistedTaskSession.mockResolvedValue(summary);
-		taskSessionService.listMessages.mockReturnValue([latestMessage]);
-
-		const api = createRuntimeApi({
-			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
-			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
-			setActiveRuntimeConfig: vi.fn(),
-			getScopedTerminalManager: vi.fn(async () => ({}) as never),
-		getScopedTaskSessionService: vi.fn(async () => taskSessionService as never),
-			resolveInteractiveShellCommand: vi.fn(),
-			runCommand: vi.fn(),
-		});
-
-		const response = await api.sendTaskChatMessage(
-			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
-			{ taskId: "task-1", text: "continue" },
-		);
-
-		expect(response.ok).toBe(true);
-		expect(taskSessionService.rebindPersistedTaskSession).toHaveBeenCalledWith("task-1");
-		expect(taskSessionService.sendTaskSessionInput).toHaveBeenNthCalledWith(1, "task-1", "continue", undefined, undefined);
-		expect(taskSessionService.sendTaskSessionInput).toHaveBeenNthCalledWith(2, "task-1", "continue", undefined, undefined);
-		expect(response.message).toEqual(latestMessage);
-	});
-
-	it("allows kanban by default for non-cline providers", async () => {
-		const api = createRuntimeApi({
-			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
-			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
-			setActiveRuntimeConfig: vi.fn(),
-			getScopedTerminalManager: vi.fn(async () => ({}) as never),
-		getScopedTaskSessionService: vi.fn(async () => createTaskSessionServiceMock() as never),
-			resolveInteractiveShellCommand: vi.fn(),
-			runCommand: vi.fn(),
-		});
-
-		const response = await api.getKanbanAccess({
-			workspaceId: "workspace-1",
-			workspacePath: "/tmp/repo",
-		});
-
-		expect(response.enabled).toBe(true);
 	});
 
 	it("runs reset teardown before deleting debug state paths", async () => {
@@ -495,8 +313,7 @@ describe("createRuntimeApi runtime behavior", () => {
 			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
 			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
 			setActiveRuntimeConfig: vi.fn(),
-			getScopedTerminalManager: vi.fn(async () => ({}) as never),
-		getScopedTaskSessionService: vi.fn(async () => createTaskSessionServiceMock() as never),
+			getScopedTerminalManager: vi.fn(async () => createTerminalManagerMock() as never),
 			resolveInteractiveShellCommand: vi.fn(),
 			runCommand: vi.fn(),
 			prepareForStateReset,
@@ -538,8 +355,7 @@ describe("createRuntimeApi runtime behavior", () => {
 			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
 			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
 			setActiveRuntimeConfig: vi.fn(),
-			getScopedTerminalManager: vi.fn(async () => ({}) as never),
-		getScopedTaskSessionService: vi.fn(async () => createTaskSessionServiceMock() as never),
+			getScopedTerminalManager: vi.fn(async () => createTerminalManagerMock() as never),
 			resolveInteractiveShellCommand: vi.fn(),
 			runCommand: vi.fn(),
 			prepareForStateReset: vi.fn(async () => {

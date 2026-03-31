@@ -19,14 +19,6 @@ describe("inferHookSourceFromPayload", () => {
 		).toBe("claude");
 	});
 
-	it("infers droid from windows transcript path", () => {
-		expect(
-			inferHookSourceFromPayload({
-				transcript_path: "C:\\Users\\dev\\.factory\\logs\\session.jsonl",
-			}),
-		).toBe("droid");
-	});
-
 	it("falls back to codex event type when transcript path does not infer a source", () => {
 		expect(
 			inferHookSourceFromPayload({

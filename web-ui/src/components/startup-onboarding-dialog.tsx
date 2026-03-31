@@ -18,7 +18,6 @@ export function StartupOnboardingDialog({
 	onClose,
 	selectedAgentId,
 	agents,
-	agentProviderSettings,
 	onSelectAgent,
 	workspaceId: _workspaceId,
 	runtimeConfig,
@@ -28,7 +27,6 @@ export function StartupOnboardingDialog({
 	onClose: () => void;
 	selectedAgentId?: RuntimeAgentId | null;
 	agents?: RuntimeAgentDefinition[];
-	agentProviderSettings?: unknown;
 	onSelectAgent?: (agentId: RuntimeAgentId) => Promise<{ ok: boolean; message?: string }>;
 	workspaceId?: string | null;
 	runtimeConfig?: RuntimeConfigResponse | null;
@@ -87,7 +85,6 @@ export function StartupOnboardingDialog({
 					runtimeConfig={runtimeConfig ?? null}
 					selectedAgentId={selectedAgentId ?? null}
 					agents={agents ?? []}
-					agentProviderSettings={agentProviderSettings ?? null}
 					activeSlideIndex={onboardingSlideIndex}
 					onSelectAgent={onSelectAgent}
 					onAgentSetupSaved={onAgentSetupSaved}

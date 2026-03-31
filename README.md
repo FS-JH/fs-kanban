@@ -12,7 +12,13 @@
 
 ### Supported Release Surface
 
-This release is focused on local orchestration with Codex and Claude Code. The board, worktree, terminal, and streaming infrastructure are stable parts of the product surface. Legacy native-agent compatibility shims may still exist internally for older state handling, but the supported CLI paths in this release are the Codex and Claude flows exposed in the UI.
+FS Kanban v2.0 is focused on local orchestration with Codex and Claude Code only.
+
+- Task sessions run through local CLI launches in isolated worktrees
+- The board, terminal, diff, hook, and websocket paths are local-first and file-backed
+- Runtime settings now describe local agent selection and launch behavior only
+
+Hosted provider settings, OAuth setup flows, MCP settings screens, and the old native Cline compatibility layer are no longer part of the supported release surface.
 
 ### Local Setup
 

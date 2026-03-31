@@ -133,7 +133,6 @@ export function TaskStartAgentOnboardingCarousel({
 	runtimeConfig: RuntimeConfigResponse | null;
 	selectedAgentId: RuntimeAgentId | null;
 	agents: RuntimeAgentDefinition[];
-	agentProviderSettings?: unknown;
 	activeSlideIndex: number;
 	onSelectAgent?: (agentId: RuntimeAgentId) => Promise<AgentSelectionResult>;
 	onAgentSetupSaved?: () => void;

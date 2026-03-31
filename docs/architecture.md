@@ -4,12 +4,10 @@
 
 FS Kanban is a local orchestration board for running coding agents in parallel. The core job of the app is to turn board actions into task sessions, keep those sessions attached to git worktrees, and stream live state back to the UI.
 
-The current runtime focuses on two primary coding agents:
+The current runtime focuses on two coding agents:
 
 - Codex
 - Claude Code
-
-Other command-driven agents can still fit the terminal model, but the documented path and the active onboarding flow center on those two.
 
 ## High-Level Stack
 
@@ -121,15 +119,9 @@ The UI focuses on:
 
 ## Compatibility Notes
 
-FS Kanban still contains some compatibility shims and legacy names while the fork completes its migration away from the upstream runtime model.
+FS Kanban v2.0 removes the old native Cline runtime layer, provider settings APIs, and MCP/OAuth settings surfaces from the supported architecture.
 
-That includes:
-
-- a small `src/cline-sdk/` compatibility layer
-- a few `Cline`-named types and test helpers
-- legacy environment variable names that remain for compatibility with existing tooling
-
-Those names should be treated as migration residue, not the main architecture.
+Legacy persisted config values may still normalize onto the current Codex/Claude model when older local state is loaded, but the runtime and UI are now designed around the local CLI task-session path only.
 
 ## What To Change First
 

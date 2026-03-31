@@ -4,7 +4,7 @@ import { AlertCircle, GitBranch, Play, RotateCcw, Trash2 } from "lucide-react";
 import type { MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { formatClineToolCallLabel as formatToolCallLabel } from "@runtime-cline-tool-call-display";
+import { formatToolCallLabel } from "@runtime-tool-call-display";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";

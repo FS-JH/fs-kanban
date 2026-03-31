@@ -7,7 +7,7 @@ import {
 	detectActiveAgentComposerToken,
 } from "@/components/detail-panels/agent-chat-composer-completion";
 
-describe("cline-chat-composer-completion", () => {
+describe("agent-chat-composer-completion", () => {
 	it("detects active mention tokens at the cursor", () => {
 		expect(detectActiveAgentComposerToken("Review @src/comp", "Review @src/comp".length)).toEqual({
 			kind: "mention",

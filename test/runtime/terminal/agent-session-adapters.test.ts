@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,8 +7,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { prepareAgentLaunch } from "../../../src/terminal/agent-session-adapters.js";
 
 const originalHome = process.env.HOME;
-const originalAppData = process.env.APPDATA;
-const originalLocalAppData = process.env.LOCALAPPDATA;
 let tempHome: string | null = null;
 const originalArgv = [...process.argv];
 const originalExecArgv = [...process.execArgv];
@@ -39,16 +37,6 @@ afterEach(() => {
 		rmSync(tempHome, { recursive: true, force: true });
 		tempHome = null;
 	}
-	if (originalAppData === undefined) {
-		delete process.env.APPDATA;
-	} else {
-		process.env.APPDATA = originalAppData;
-	}
-	if (originalLocalAppData === undefined) {
-		delete process.env.LOCALAPPDATA;
-	} else {
-		process.env.LOCALAPPDATA = originalLocalAppData;
-	}
 	process.argv = [...originalArgv];
 	process.execArgv = [...originalExecArgv];
 	Object.defineProperty(process, "execPath", {
@@ -57,8 +45,8 @@ afterEach(() => {
 	});
 });
 
-describe("prepareAgentLaunch hook strategies", () => {
-	it("routes codex through hooks codex-wrapper command", async () => {
+describe("prepareAgentLaunch", () => {
+	it("routes codex through the hooks codex-wrapper command", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
 			taskId: "task-1",
@@ -79,9 +67,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launchCommand).toContain("--real-binary");
 		expect(launchCommand).toContain("codex");
 		expect(launchCommand).toContain("--");
-
-		const wrapperPath = join(homedir(), ".config", "fs-kanban", "hooks", "codex", "codex-wrapper.mjs");
-		expect(existsSync(wrapperPath)).toBe(false);
 	});
 
 	it("appends Kanban sidebar instructions for home Claude sessions", async () => {
@@ -121,7 +106,7 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.args[configArgIndex + 1]).toContain("'/usr/local/bin/node' '/Users/example/repo/dist/cli.js' task create");
 	});
 
-	it("writes Claude settings with explicit permission hook", async () => {
+	it("writes Claude settings with explicit permission and tool hooks", async () => {
 		setupTempHome();
 		await prepareAgentLaunch({
 			taskId: "task-1",
@@ -141,149 +126,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(settings.hooks?.PreToolUse).toBeDefined();
 		expect(settings.hooks?.PostToolUse).toBeDefined();
 		expect(settings.hooks?.PostToolUseFailure).toBeDefined();
-	});
-
-	it("writes Gemini settings with AfterTool mapped to to_in_progress", async () => {
-		setupTempHome();
-		await prepareAgentLaunch({
-			taskId: "task-1",
-			agentId: "gemini",
-			binary: "gemini",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			workspaceId: "workspace-1",
-		});
-
-		const settingsPath = join(homedir(), ".config", "fs-kanban", "hooks", "gemini", "settings.json");
-		const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as {
-			hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
-		};
-		const afterToolCommand = settings.hooks?.AfterTool?.[0]?.hooks?.[0]?.command;
-		expect(afterToolCommand).toContain("hooks");
-		expect(afterToolCommand).toContain("gemini-hook");
-		const hookScriptPath = join(homedir(), ".config", "fs-kanban", "hooks", "gemini", "gemini-hook.mjs");
-		expect(existsSync(hookScriptPath)).toBe(false);
-	});
-
-	it("writes OpenCode plugin with root-session filtering and permission hooks", async () => {
-		setupTempHome();
-		await prepareAgentLaunch({
-			taskId: "task-1",
-			agentId: "opencode",
-			binary: "opencode",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			workspaceId: "workspace-1",
-		});
-
-		const pluginPath = join(homedir(), ".config", "fs-kanban", "hooks", "opencode", "kanban.js");
-		const plugin = readFileSync(pluginPath, "utf8");
-		expect(plugin).toContain("parentID");
-		expect(plugin).toContain('"permission.ask"');
-		expect(plugin).toContain('"tool.execute.before"');
-		expect(plugin).toContain('"tool.execute.after"');
-		expect(plugin).toContain("session.status");
-		expect(plugin).toContain("message.part.updated");
-		expect(plugin).toContain("last_assistant_message");
-		expect(plugin).toContain("--metadata-base64");
-		expect(plugin).toContain('if (kind === "review")');
-		expect(plugin).toContain('currentState = "idle"');
-	});
-
-	it("loads OpenCode preferred model from LOCALAPPDATA state and auth paths", async () => {
-		const homePath = setupTempHome();
-		const localAppDataPath = join(homePath, "AppData", "Local");
-		process.env.LOCALAPPDATA = localAppDataPath;
-
-		const statePath = join(localAppDataPath, "opencode", "state");
-		mkdirSync(statePath, { recursive: true });
-		writeFileSync(
-			join(statePath, "model.json"),
-			JSON.stringify(
-				{
-					recent: [
-						{ providerID: "anthropic", modelID: "claude-3-7-sonnet" },
-						{ providerID: "openai", modelID: "gpt-4o" },
-					],
-				},
-				null,
-				2,
-			),
-			"utf8",
-		);
-
-		const authPath = join(localAppDataPath, "opencode");
-		mkdirSync(authPath, { recursive: true });
-		writeFileSync(
-			join(authPath, "auth.json"),
-			JSON.stringify(
-				{
-					openai: { key: "sk-test" },
-				},
-				null,
-				2,
-			),
-			"utf8",
-		);
-
-		const launch = await prepareAgentLaunch({
-			taskId: "task-opencode-model",
-			agentId: "opencode",
-			binary: "opencode",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-		});
-
-		const modelIndex = launch.args.indexOf("--model");
-		expect(modelIndex).toBeGreaterThan(-1);
-		expect(launch.args[modelIndex + 1]).toBe("openai/gpt-4o");
-	});
-
-	it("writes Droid settings with hook transitions and runtime autonomy mode", async () => {
-		setupTempHome();
-		const launch = await prepareAgentLaunch({
-			taskId: "task-1",
-			agentId: "droid",
-			binary: "droid",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd: "/tmp",
-			prompt: "",
-			workspaceId: "workspace-1",
-		});
-
-		expect(launch.env.KANBAN_HOOK_TASK_ID).toBe("task-1");
-		expect(launch.env.KANBAN_HOOK_WORKSPACE_ID).toBe("workspace-1");
-
-		const settingsArgIndex = launch.args.indexOf("--settings");
-		expect(settingsArgIndex).toBeGreaterThanOrEqual(0);
-		const settingsPath = launch.args[settingsArgIndex + 1];
-		expect(settingsPath).toBeDefined();
-
-		const settings = JSON.parse(readFileSync(settingsPath ?? "", "utf8")) as {
-			autonomyMode?: string;
-			hooks?: Record<string, Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>>;
-		};
-		expect(settings.autonomyMode).toBe("auto-high");
-		expect(settings.hooks?.Stop?.[0]?.hooks?.[0]?.command).toContain("to_review");
-		expect(settings.hooks?.Notification?.[0]?.hooks?.[0]?.command).toContain("activity");
-		expect(settings.hooks?.Notification?.[1]?.hooks?.[0]?.command).toContain("to_review");
-		expect(settings.hooks?.PreToolUse?.[0]?.matcher).toBe("*");
-		expect(settings.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command).toContain("activity");
-		const preToolInProgressHook = settings.hooks?.PreToolUse?.find(
-			(hook) => hook.matcher === "Read|Grep|Glob|FetchUrl|WebSearch|Execute|Task|Edit|Create",
-		);
-		expect(preToolInProgressHook?.hooks?.[0]?.command).toContain("to_in_progress");
-		const preToolReviewHook = settings.hooks?.PreToolUse?.find((hook) => hook.matcher === "AskUser");
-		expect(preToolReviewHook?.hooks?.[0]?.command).toContain("to_review");
-		expect(settings.hooks?.PostToolUse?.[0]?.matcher).toBe("*");
-		expect(settings.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command).toContain("activity");
-		const postToolInProgressHook = settings.hooks?.PostToolUse?.find((hook) => hook.matcher === "AskUser");
-		expect(postToolInProgressHook?.hooks?.[0]?.command).toContain("to_in_progress");
-		expect(settings.hooks?.UserPromptSubmit?.[0]?.hooks?.[0]?.command).toContain("to_in_progress");
 	});
 
 	it("materializes task images for CLI prompts", async () => {
@@ -314,25 +156,26 @@ describe("prepareAgentLaunch hook strategies", () => {
 		const imagePath = imagePathMatch?.[1] ?? "";
 		expect(existsSync(imagePath)).toBe(true);
 		expect(readFileSync(imagePath).toString("utf8")).toBe("hello");
-
 	});
 
 	it("rejects unsupported legacy agent launches", async () => {
 		setupTempHome();
-		await expect(
-			prepareAgentLaunch({
-				taskId: "task-1",
-				agentId: "cline" as never,
-				binary: "cline",
-				args: [],
-				cwd: "/tmp",
-				prompt: "",
-				workspaceId: "workspace-1",
-			}),
-		).rejects.toThrow("Unsupported agent launch requested: cline");
+		for (const legacyAgentId of ["cline", "gemini", "opencode", "droid"] as const) {
+			await expect(
+				prepareAgentLaunch({
+					taskId: `task-${legacyAgentId}`,
+					agentId: legacyAgentId as never,
+					binary: legacyAgentId,
+					args: [],
+					cwd: "/tmp",
+					prompt: "",
+					workspaceId: "workspace-1",
+				}),
+			).rejects.toThrow(`Unsupported agent launch requested: ${legacyAgentId}`);
+		}
 	});
 
-	it("adds resume flags for each supported agent", async () => {
+	it("adds resume flags for the supported agents", async () => {
 		setupTempHome();
 
 		const codexLaunch = await prepareAgentLaunch({
@@ -356,42 +199,9 @@ describe("prepareAgentLaunch hook strategies", () => {
 			resumeFromTrash: true,
 		});
 		expect(claudeLaunch.args).toContain("--continue");
-
-		const geminiLaunch = await prepareAgentLaunch({
-			taskId: "task-gemini",
-			agentId: "gemini",
-			binary: "gemini",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			resumeFromTrash: true,
-		});
-		expect(geminiLaunch.args).toEqual(expect.arrayContaining(["--resume", "latest"]));
-
-		const opencodeLaunch = await prepareAgentLaunch({
-			taskId: "task-opencode",
-			agentId: "opencode",
-			binary: "opencode",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			resumeFromTrash: true,
-		});
-		expect(opencodeLaunch.args).toContain("--continue");
-
-		const droidLaunch = await prepareAgentLaunch({
-			taskId: "task-droid",
-			agentId: "droid",
-			binary: "droid",
-			args: [],
-			cwd: "/tmp",
-			prompt: "",
-			resumeFromTrash: true,
-		});
-		expect(droidLaunch.args).toContain("--resume");
 	});
 
-	it("applies autonomous mode flags in adapters for supported CLIs", async () => {
+	it("applies autonomous mode flags for the supported agents", async () => {
 		setupTempHome();
 
 		const claudeLaunch = await prepareAgentLaunch({
@@ -415,29 +225,6 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(codexLaunch.args).toContain("--dangerously-bypass-approvals-and-sandbox");
-
-		const geminiLaunch = await prepareAgentLaunch({
-			taskId: "task-gemini-auto",
-			agentId: "gemini",
-			binary: "gemini",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		expect(geminiLaunch.args).toContain("--yolo");
-
-		const droidLaunch = await prepareAgentLaunch({
-			taskId: "task-droid-auto",
-			agentId: "droid",
-			binary: "droid",
-			args: [],
-			autonomousModeEnabled: true,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		const settingsArgIndex = droidLaunch.args.indexOf("--settings");
-		expect(settingsArgIndex).toBeGreaterThanOrEqual(0);
 	});
 
 	it("preserves explicit autonomous args when autonomous mode is disabled", async () => {
@@ -464,28 +251,5 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(codexLaunch.args).toContain("--dangerously-bypass-approvals-and-sandbox");
-
-		const geminiLaunch = await prepareAgentLaunch({
-			taskId: "task-gemini-no-auto",
-			agentId: "gemini",
-			binary: "gemini",
-			args: ["--yolo"],
-			autonomousModeEnabled: false,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		expect(geminiLaunch.args).toContain("--yolo");
-
-		const droidLaunch = await prepareAgentLaunch({
-			taskId: "task-droid-no-auto",
-			agentId: "droid",
-			binary: "droid",
-			args: [],
-			autonomousModeEnabled: false,
-			cwd: "/tmp",
-			prompt: "",
-		});
-		const settingsArgIndex = droidLaunch.args.indexOf("--settings");
-		expect(settingsArgIndex).toBeGreaterThanOrEqual(0);
 	});
 });

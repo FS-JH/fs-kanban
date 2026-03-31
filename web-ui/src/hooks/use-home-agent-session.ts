@@ -1,13 +1,11 @@
-// Manages the synthetic home agent session lifecycle for the sidebar.
+// Manages the synthetic home agent terminal session lifecycle for the sidebar.
 // It keeps one in-memory session identity stable per workspace while the app
-// stays open and rotates it only when the selected agent configuration
-// meaningfully changes.
+// stays open and rotates it only when the selected agent command changes.
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useMemo, useRef } from "react";
 import { createHomeAgentSessionId, isHomeAgentSessionIdForWorkspace } from "@runtime-home-agent-session";
 
 import { notifyError } from "@/components/app-toaster";
-import { getRuntimeAgentProviderSettings, isNativeTaskAgentSelected } from "@/runtime/native-agent";
 import { estimateTaskSessionGeometry } from "@/runtime/task-session-geometry";
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type {
@@ -16,10 +14,7 @@ import type {
 	RuntimeTaskSessionSummary,
 } from "@/runtime/types";
 
-type HomeAgentPanelMode = "chat" | "terminal";
-
 interface HomeAgentDescriptor {
-	panelMode: HomeAgentPanelMode;
 	descriptorKey: string;
 	taskId: string;
 }
@@ -28,14 +23,12 @@ interface UseHomeAgentSessionInput {
 	currentProjectId: string | null;
 	runtimeProjectConfig: RuntimeConfigResponse | null;
 	workspaceGit: RuntimeGitRepositoryInfo | null;
-	clineSessionContextVersion: number;
 	sessionSummaries: Record<string, RuntimeTaskSessionSummary>;
 	setSessionSummaries: Dispatch<SetStateAction<Record<string, RuntimeTaskSessionSummary>>>;
 	upsertSessionSummary: (summary: RuntimeTaskSessionSummary) => void;
 }
 
 interface UseHomeAgentSessionResult {
-	panelMode: HomeAgentPanelMode | null;
 	taskId: string | null;
 }
 
@@ -46,19 +39,7 @@ interface HomeAgentSessionIdentity {
 
 interface HomeAgentWorkspaceDescriptor {
 	descriptorKey: string;
-	panelMode: HomeAgentPanelMode;
 	taskId: string;
-}
-
-function buildAgentDescriptor(config: RuntimeConfigResponse): string {
-	const agentProviderSettings = getRuntimeAgentProviderSettings(config);
-	return JSON.stringify({
-		agentId: config.selectedAgentId,
-		providerId: agentProviderSettings.providerId ?? agentProviderSettings.oauthProvider ?? "",
-		modelId: agentProviderSettings.modelId ?? "",
-		baseUrl: agentProviderSettings.baseUrl ?? "",
-		reasoningEffort: agentProviderSettings.reasoningEffort ?? null,
-	});
 }
 
 function buildTerminalDescriptor(config: RuntimeConfigResponse): string {
@@ -114,7 +95,6 @@ export function useHomeAgentSession({
 	currentProjectId,
 	runtimeProjectConfig,
 	workspaceGit,
-	clineSessionContextVersion,
 	sessionSummaries,
 	setSessionSummaries,
 	upsertSessionSummary,
@@ -124,41 +104,22 @@ export function useHomeAgentSession({
 	const desiredTaskIdByWorkspaceRef = useRef(new Map<string, string>());
 	const startedSessionKeysRef = useRef(new Set<string>());
 	const pendingStartRequestIdsRef = useRef(new Map<string, number>());
-	const previousAgentSessionContextVersionByWorkspaceRef = useRef(new Map<string, number>());
 	const nextStartRequestIdRef = useRef(0);
 	const disposedRef = useRef(false);
-	const agentProviderSettings = getRuntimeAgentProviderSettings(runtimeProjectConfig);
 
 	useEffect(() => {
 		latestBaseRefRef.current = resolveHomeAgentBaseRef(workspaceGit);
 	}, [workspaceGit?.currentBranch, workspaceGit?.defaultBranch]);
 
 	const descriptor = useMemo<HomeAgentDescriptor | null>(() => {
-		if (!currentProjectId || !runtimeProjectConfig) {
+		if (!currentProjectId || !runtimeProjectConfig || !runtimeProjectConfig.effectiveCommand) {
 			return null;
 		}
 
-		let panelMode: HomeAgentPanelMode;
-		let descriptorKey: string;
-		if (isNativeTaskAgentSelected(runtimeProjectConfig.selectedAgentId)) {
-			panelMode = "chat";
-			descriptorKey = buildAgentDescriptor(runtimeProjectConfig);
-		} else {
-			if (!runtimeProjectConfig.effectiveCommand) {
-				return null;
-			}
-			panelMode = "terminal";
-			descriptorKey = buildTerminalDescriptor(runtimeProjectConfig);
-		}
-
+		const descriptorKey = buildTerminalDescriptor(runtimeProjectConfig);
 		const existingDescriptor = homeDescriptorByWorkspaceRef.current.get(currentProjectId);
-		if (
-			existingDescriptor &&
-			existingDescriptor.descriptorKey === descriptorKey &&
-			existingDescriptor.panelMode === panelMode
-		) {
+		if (existingDescriptor && existingDescriptor.descriptorKey === descriptorKey) {
 			return {
-				panelMode,
 				descriptorKey,
 				taskId: existingDescriptor.taskId,
 			};
@@ -167,24 +128,13 @@ export function useHomeAgentSession({
 		const taskId = createHomeAgentSessionId(currentProjectId, runtimeProjectConfig.selectedAgentId);
 		homeDescriptorByWorkspaceRef.current.set(currentProjectId, {
 			descriptorKey,
-			panelMode,
 			taskId,
 		});
 		return {
-			panelMode,
 			descriptorKey,
 			taskId,
 		};
-	}, [
-		currentProjectId,
-		agentProviderSettings.baseUrl,
-		agentProviderSettings.modelId,
-		agentProviderSettings.reasoningEffort,
-		agentProviderSettings.oauthProvider,
-		agentProviderSettings.providerId,
-		runtimeProjectConfig?.effectiveCommand,
-		runtimeProjectConfig?.selectedAgentId,
-	]);
+	}, [currentProjectId, runtimeProjectConfig?.effectiveCommand, runtimeProjectConfig?.selectedAgentId]);
 
 	const descriptorTaskId = descriptor?.taskId ?? null;
 	const hasLoadedRuntimeProjectConfig = runtimeProjectConfig !== null;
@@ -240,54 +190,8 @@ export function useHomeAgentSession({
 		});
 	}, [currentProjectId, descriptorTaskId, hasLoadedRuntimeProjectConfig, setSessionSummaries]);
 
-	// When MCP settings or auth change, the runtime bumps the Agent session context version.
-	// Reload the existing home chat in place so it keeps the same sidebar task id and messages,
-	// but restarts the underlying Agent session with a fresh MCP tool bundle.
 	useEffect(() => {
-		if (!currentProjectId || !descriptor || descriptor.panelMode !== "chat") {
-			return;
-		}
-
-		const previousVersion = previousAgentSessionContextVersionByWorkspaceRef.current.get(currentProjectId);
-		previousAgentSessionContextVersionByWorkspaceRef.current.set(currentProjectId, clineSessionContextVersion);
-
-		if (previousVersion === undefined || previousVersion === clineSessionContextVersion) {
-			return;
-		}
-
-		if (!sessionSummaries[descriptor.taskId]) {
-			return;
-		}
-
-		let cancelled = false;
-		void getRuntimeTrpcClient(currentProjectId).runtime.reloadTaskChatSession
-			.mutate({
-				taskId: descriptor.taskId,
-			})
-			.then((response) => {
-				if (cancelled || disposedRef.current) {
-					return;
-				}
-				if (!response.ok || !response.summary) {
-					throw new Error(response.error ?? "Could not reload home agent session.");
-				}
-				upsertSessionSummary(response.summary);
-			})
-			.catch((error) => {
-				if (cancelled || disposedRef.current) {
-					return;
-				}
-				const message = error instanceof Error ? error.message : String(error);
-				notifyError(message);
-			});
-
-		return () => {
-			cancelled = true;
-		};
-	}, [clineSessionContextVersion, currentProjectId, descriptor, sessionSummaries, upsertSessionSummary]);
-
-	useEffect(() => {
-		if (!currentProjectId || !descriptor || descriptor.panelMode !== "terminal") {
+		if (!currentProjectId || !descriptor) {
 			return;
 		}
 
@@ -300,16 +204,13 @@ export function useHomeAgentSession({
 		if (desiredTaskIdByWorkspaceRef.current.get(session.workspaceId) !== session.taskId) {
 			return;
 		}
-
 		if (startedSessionKeysRef.current.has(sessionKey)) {
 			return;
 		}
-
 		if (sessionSummaries[session.taskId]) {
 			startedSessionKeysRef.current.add(sessionKey);
 			return;
 		}
-
 		if (pendingStartRequestIdsRef.current.has(sessionKey)) {
 			return;
 		}
@@ -343,7 +244,6 @@ export function useHomeAgentSession({
 					await stopHomeAgentSession(session);
 					return;
 				}
-
 				if (disposedRef.current) {
 					return;
 				}
@@ -371,12 +271,10 @@ export function useHomeAgentSession({
 			homeDescriptorByWorkspaceRef.current.clear();
 			startedSessionKeysRef.current.clear();
 			pendingStartRequestIdsRef.current.clear();
-			previousAgentSessionContextVersionByWorkspaceRef.current.clear();
 		};
 	}, []);
 
 	return {
-		panelMode: descriptor?.panelMode ?? null,
 		taskId: descriptor?.taskId ?? null,
 	};
 }
