@@ -176,19 +176,18 @@ async function canReachKanbanServer(workspaceId: string | null): Promise<boolean
 		if (workspaceId) {
 			headers["x-kanban-workspace-id"] = workspaceId;
 		}
-		const response = await fetch(buildKanbanRuntimeUrl("/api/trpc/projects.list"), {
+		const response = await fetch(buildKanbanRuntimeUrl("/api/health"), {
 			method: "GET",
 			headers,
 			signal: AbortSignal.timeout(1_500),
 		});
-		if (response.status === 404) {
+		if (!response.ok) {
 			return false;
 		}
 		const payload = (await response.json().catch(() => null)) as {
-			result?: { data?: unknown };
-			error?: unknown;
+			status?: unknown;
 		} | null;
-		return Boolean(payload && (payload.result || payload.error));
+		return payload?.status === "ok";
 	} catch {
 		return false;
 	}
