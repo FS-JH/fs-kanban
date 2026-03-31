@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage } from "node:http";
 import { join } from "node:path";
+import packageJson from "../../package.json" with { type: "json" };
 
 import { createHTTPHandler } from "@trpc/server/adapters/standalone";
 import { handleRuntimeMcpOauthCallback } from "../cline-sdk/cline-mcp-runtime-service.js";
@@ -26,6 +27,8 @@ import { createWorkspaceApi } from "../trpc/workspace-api.js";
 import { getWebUiDir, normalizeRequestPath, readAsset } from "./assets.js";
 import type { RuntimeStateHub } from "./runtime-state-hub.js";
 import type { WorkspaceRegistry } from "./workspace-registry.js";
+
+const KANBAN_VERSION = typeof packageJson.version === "string" ? packageJson.version : "0.1.0";
 
 interface DisposeTrackedWorkspaceResult {
 	terminalManager: TerminalSessionManager | null;
@@ -239,6 +242,20 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 			}
 			if (pathname.startsWith("/api/trpc")) {
 				await trpcHttpHandler(req, res);
+				return;
+			}
+			if (pathname === "/api/health") {
+				res.writeHead(200, {
+					"Content-Type": "application/json; charset=utf-8",
+					"Cache-Control": "no-store",
+				});
+				res.end(
+					JSON.stringify({
+						status: "ok",
+						version: KANBAN_VERSION,
+						uptime: process.uptime(),
+					}),
+				);
 				return;
 			}
 			if (pathname.startsWith("/api/")) {

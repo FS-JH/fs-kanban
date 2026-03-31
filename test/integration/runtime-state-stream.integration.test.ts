@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import packageJson from "../../package.json" with { type: "json" };
 import { describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
@@ -30,6 +31,7 @@ import { createGitTestEnv } from "../utilities/git-env.js";
 import { createTempDir } from "../utilities/temp-dir.js";
 
 const requireFromHere = createRequire(import.meta.url);
+const KANBAN_VERSION = typeof packageJson.version === "string" ? packageJson.version : "0.1.0";
 
 interface RuntimeStreamClient {
 	socket: WebSocket;
@@ -457,7 +459,47 @@ async function requestJson<T>(input: {
 	};
 }
 
+async function requestHealth(baseUrl: string): Promise<{
+	status: number;
+	payload: { status?: unknown; version?: unknown; uptime?: unknown } | null;
+}> {
+	const response = await fetch(`${baseUrl}/api/health`);
+	const payload = (await response.json().catch(() => null)) as {
+		status?: unknown;
+		version?: unknown;
+		uptime?: unknown;
+	} | null;
+	return {
+		status: response.status,
+		payload,
+	};
+}
+
 describe.sequential("runtime state stream integration", () => {
+	it("serves a stable health endpoint", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-health-");
+		const { path: nonGitPath, cleanup: cleanupNonGitPath } = createTempDir("kanban-health-");
+
+		const port = await getAvailablePort();
+		const server = await startKanbanServer({
+			cwd: nonGitPath,
+			homeDir: tempHome,
+			port,
+		});
+
+		try {
+			const response = await requestHealth(`http://127.0.0.1:${port}`);
+			expect(response.status).toBe(200);
+			expect(response.payload?.status).toBe("ok");
+			expect(response.payload?.version).toBe(KANBAN_VERSION);
+			expect(typeof response.payload?.uptime).toBe("number");
+		} finally {
+			await server.stop();
+			cleanupNonGitPath();
+			cleanupHome();
+		}
+	}, 30_000);
+
 	it("starts outside a git repository with no active workspace", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-no-git-");
 		const { path: nonGitPath, cleanup: cleanupNonGitPath } = createTempDir("kanban-no-git-");
