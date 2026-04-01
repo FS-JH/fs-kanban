@@ -8,7 +8,7 @@ import type { Command } from "commander";
 
 import type { RuntimeHookEvent, RuntimeTaskHookActivity } from "../core/api-contract.js";
 import { buildKanbanCommandParts } from "../core/kanban-command.js";
-import { buildKanbanRuntimeUrl } from "../core/runtime-endpoint.js";
+import { buildKanbanRuntimeBindUrl } from "../core/runtime-endpoint.js";
 import { parseHookRuntimeContextFromEnv } from "../terminal/hook-runtime-context.js";
 import type { RuntimeAppRouter } from "../trpc/app-router.js";
 
@@ -432,7 +432,7 @@ async function ingestHookEvent(args: HooksIngestArgs): Promise<void> {
 	const trpcClient = createTRPCProxyClient<RuntimeAppRouter>({
 		links: [
 			httpBatchLink({
-				url: buildKanbanRuntimeUrl("/api/trpc"),
+				url: buildKanbanRuntimeBindUrl("/api/trpc"),
 				maxItems: 1,
 			}),
 		],

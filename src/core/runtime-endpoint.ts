@@ -1,15 +1,40 @@
 export const DEFAULT_KANBAN_RUNTIME_HOST = "127.0.0.1";
 export const DEFAULT_KANBAN_RUNTIME_PORT = 3484;
 
-let runtimeHost: string = process.env.KANBAN_RUNTIME_HOST?.trim() || DEFAULT_KANBAN_RUNTIME_HOST;
+function normalizeRuntimeHost(rawHost: string | null | undefined, fallback: string): string {
+	const normalized = rawHost?.trim();
+	return normalized ? normalized : fallback;
+}
+
+let runtimeHost = normalizeRuntimeHost(process.env.KANBAN_RUNTIME_HOST, DEFAULT_KANBAN_RUNTIME_HOST);
+let runtimeAdvertisedHost = normalizeRuntimeHost(process.env.KANBAN_RUNTIME_ADVERTISED_HOST, runtimeHost);
 
 export function getKanbanRuntimeHost(): string {
 	return runtimeHost;
 }
 
+export function getKanbanRuntimeAdvertisedHost(): string {
+	return runtimeAdvertisedHost;
+}
+
 export function setKanbanRuntimeHost(host: string): void {
-	runtimeHost = host;
-	process.env.KANBAN_RUNTIME_HOST = host;
+	const normalizedHost = normalizeRuntimeHost(host, DEFAULT_KANBAN_RUNTIME_HOST);
+	runtimeHost = normalizedHost;
+	process.env.KANBAN_RUNTIME_HOST = normalizedHost;
+	if (!process.env.KANBAN_RUNTIME_ADVERTISED_HOST?.trim()) {
+		runtimeAdvertisedHost = normalizedHost;
+	}
+}
+
+export function setKanbanRuntimeAdvertisedHost(host: string | null | undefined): void {
+	const normalizedHost = host?.trim();
+	if (normalizedHost) {
+		runtimeAdvertisedHost = normalizedHost;
+		process.env.KANBAN_RUNTIME_ADVERTISED_HOST = normalizedHost;
+		return;
+	}
+	runtimeAdvertisedHost = runtimeHost;
+	delete process.env.KANBAN_RUNTIME_ADVERTISED_HOST;
 }
 
 export function parseRuntimePort(rawPort: string | undefined): number {
@@ -35,12 +60,21 @@ export function setKanbanRuntimePort(port: number): void {
 	process.env.KANBAN_RUNTIME_PORT = String(normalized);
 }
 
-export function getKanbanRuntimeOrigin(): string {
+export function getKanbanRuntimeBindOrigin(): string {
 	return `http://${getKanbanRuntimeHost()}:${getKanbanRuntimePort()}`;
 }
 
+export function getKanbanRuntimeOrigin(): string {
+	return `http://${getKanbanRuntimeAdvertisedHost()}:${getKanbanRuntimePort()}`;
+}
+
 export function getKanbanRuntimeWsOrigin(): string {
-	return `ws://${getKanbanRuntimeHost()}:${getKanbanRuntimePort()}`;
+	return `ws://${getKanbanRuntimeAdvertisedHost()}:${getKanbanRuntimePort()}`;
+}
+
+export function buildKanbanRuntimeBindUrl(pathname: string): string {
+	const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname}`;
+	return `${getKanbanRuntimeBindOrigin()}${normalizedPath}`;
 }
 
 export function buildKanbanRuntimeUrl(pathname: string): string {

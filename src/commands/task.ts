@@ -2,7 +2,7 @@ import { createTRPCProxyClient, httpBatchLink } from "@trpc/client";
 import type { Command } from "commander";
 
 import type { RuntimeBoardCard, RuntimeBoardDependency, RuntimeWorkspaceStateResponse } from "../core/api-contract.js";
-import { buildKanbanRuntimeUrl, getKanbanRuntimeOrigin } from "../core/runtime-endpoint.js";
+import { buildKanbanRuntimeBindUrl, getKanbanRuntimeBindOrigin } from "../core/runtime-endpoint.js";
 import {
 	addTaskDependency,
 	addTaskToColumn,
@@ -95,7 +95,7 @@ function createRuntimeTrpcClient(workspaceId: string | null) {
 	return createTRPCProxyClient<RuntimeAppRouter>({
 		links: [
 			httpBatchLink({
-				url: buildKanbanRuntimeUrl("/api/trpc"),
+				url: buildKanbanRuntimeBindUrl("/api/trpc"),
 				headers: () => (workspaceId ? { "x-kanban-workspace-id": workspaceId } : {}),
 			}),
 		],
@@ -870,7 +870,7 @@ async function runTaskCommand(handler: () => Promise<JsonRecord>): Promise<void>
 	} catch (error) {
 		printJson({
 			ok: false,
-			error: `Task command failed at ${getKanbanRuntimeOrigin()}: ${toErrorMessage(error)}`,
+			error: `Task command failed at ${getKanbanRuntimeBindOrigin()}: ${toErrorMessage(error)}`,
 		});
 		process.exitCode = 1;
 	}

@@ -16,12 +16,14 @@ import {
 	shouldSuppressImmediateDuplicateShutdownSignals,
 } from "./core/graceful-shutdown.js";
 import {
+	buildKanbanRuntimeBindUrl,
 	buildKanbanRuntimeUrl,
 	DEFAULT_KANBAN_RUNTIME_PORT,
 	getKanbanRuntimeHost,
 	getKanbanRuntimeOrigin,
 	getKanbanRuntimePort,
 	parseRuntimePort,
+	setKanbanRuntimeAdvertisedHost,
 	setKanbanRuntimeHost,
 	setKanbanRuntimePort,
 } from "./core/runtime-endpoint.js";
@@ -33,6 +35,7 @@ interface CliOptions {
 	noOpen: boolean;
 	skipShutdownCleanup: boolean;
 	host: string | null;
+	advertiseHost: string | null;
 	port: { mode: "fixed"; value: number } | { mode: "auto" } | null;
 }
 
@@ -55,6 +58,7 @@ function parseCliPortValue(rawValue: string): { mode: "fixed"; value: number } |
 
 interface RootCommandOptions {
 	host?: string;
+	advertiseHost?: string;
 	port?: { mode: "fixed"; value: number } | { mode: "auto" };
 	open?: boolean;
 	skipShutdownCleanup?: boolean;
@@ -69,7 +73,7 @@ interface RootCommandOptions {
  */
 function shouldAutoOpenBrowserTabForInvocation(argv: string[]): boolean {
 	const launchFlags = new Set(["--open", "--no-open", "--skip-shutdown-cleanup"]);
-	const launchOptionsWithValues = new Set(["--host", "--port"]);
+	const launchOptionsWithValues = new Set(["--host", "--advertise-host", "--port"]);
 
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -176,7 +180,7 @@ async function canReachKanbanServer(workspaceId: string | null): Promise<boolean
 		if (workspaceId) {
 			headers["x-kanban-workspace-id"] = workspaceId;
 		}
-		const response = await fetch(buildKanbanRuntimeUrl("/api/health"), {
+		const response = await fetch(buildKanbanRuntimeBindUrl("/api/health"), {
 			method: "GET",
 			headers,
 			signal: AbortSignal.timeout(1_500),
@@ -207,7 +211,7 @@ async function tryOpenExistingServer(options: { noOpen: boolean; shouldAutoOpenB
 	const projectUrl = workspaceId
 		? buildKanbanRuntimeUrl(`/${encodeURIComponent(workspaceId)}`)
 		: getKanbanRuntimeOrigin();
-	console.log(`FS Kanban already running at ${getKanbanRuntimeOrigin()}`);
+	console.log(`FS Kanban already running at ${projectUrl}`);
 	if (!options.noOpen && options.shouldAutoOpenBrowser) {
 		try {
 			const { openInBrowser } = await import("./server/browser.js");
@@ -413,6 +417,10 @@ async function runMainCommand(options: CliOptions, shouldAutoOpenBrowser: boolea
 		setKanbanRuntimeHost(options.host);
 		console.log(`Binding to host ${options.host}.`);
 	}
+	if (options.advertiseHost) {
+		setKanbanRuntimeAdvertisedHost(options.advertiseHost);
+		console.log(`Advertising runtime URL host ${options.advertiseHost}.`);
+	}
 
 	const { openInBrowser } = await import("./server/browser.js");
 
@@ -493,7 +501,8 @@ function createProgram(invocationArgs: string[]): Command {
 		.name("fs-kanban")
 		.description("Local orchestration board for coding agents.")
 		.version(KANBAN_VERSION, "-v, --version", "Output the version number")
-		.option("--host <ip>", "Host IP to bind the server to (default: 127.0.0.1).")
+		.option("--host <host>", "Host or IP to bind the server to (default: 127.0.0.1).")
+		.option("--advertise-host <host>", "Host or IP to use in printed and opened Kanban URLs.")
 		.option("--port <number|auto>", "Runtime port (1-65535) or auto.", parseCliPortValue)
 		.option("--no-open", "Do not open browser automatically.")
 		.option("--skip-shutdown-cleanup", "Do not move sessions to trash or delete task worktrees on shutdown.")
@@ -507,6 +516,7 @@ function createProgram(invocationArgs: string[]): Command {
 		await runMainCommand(
 			{
 				host: options.host ?? null,
+				advertiseHost: options.advertiseHost ?? null,
 				port: options.port ?? null,
 				noOpen: options.open === false,
 				skipShutdownCleanup: options.skipShutdownCleanup === true,
