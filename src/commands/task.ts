@@ -187,6 +187,8 @@ function formatTaskRecord(state: RuntimeWorkspaceStateResponse, task: RuntimeBoa
 		prompt: task.prompt,
 		column: columnId,
 		baseRef: task.baseRef,
+		agentId: task.agentId ?? null,
+		fallbackAgentId: task.fallbackAgentId ?? null,
 		startInPlanMode: task.startInPlanMode,
 		autoReviewEnabled: task.autoReviewEnabled === true,
 		autoReviewMode: task.autoReviewMode ?? "commit",
@@ -331,11 +333,13 @@ async function createTask(input: {
 			"backlog",
 			{
 				prompt: input.prompt,
-				startInPlanMode: input.startInPlanMode,
-				autoReviewEnabled: input.autoReviewEnabled,
-				autoReviewMode: input.autoReviewMode,
-				baseRef: resolvedBaseRef,
-			},
+			startInPlanMode: input.startInPlanMode,
+			autoReviewEnabled: input.autoReviewEnabled,
+			autoReviewMode: input.autoReviewMode,
+			agentId: undefined,
+			fallbackAgentId: undefined,
+			baseRef: resolvedBaseRef,
+		},
 			() => globalThis.crypto.randomUUID(),
 		);
 		return {
@@ -391,6 +395,8 @@ async function updateTaskCommand(input: {
 		const updatedTask = updateTask(runtimeState.board, input.taskId, {
 			prompt: input.prompt ?? taskRecord.task.prompt,
 			baseRef: input.baseRef ?? taskRecord.task.baseRef,
+			agentId: taskRecord.task.agentId,
+			fallbackAgentId: taskRecord.task.fallbackAgentId,
 			startInPlanMode: input.startInPlanMode ?? taskRecord.task.startInPlanMode,
 			autoReviewEnabled: input.autoReviewEnabled ?? taskRecord.task.autoReviewEnabled === true,
 			autoReviewMode: input.autoReviewMode ?? taskRecord.task.autoReviewMode ?? "commit",
@@ -517,6 +523,7 @@ async function startTask(input: { cwd: string; taskId: string; projectPath?: str
 			taskId: task.id,
 			prompt: task.prompt,
 			startInPlanMode: task.startInPlanMode,
+			agentId: task.agentId,
 			baseRef: task.baseRef,
 		});
 		if (!started.ok || !started.summary) {

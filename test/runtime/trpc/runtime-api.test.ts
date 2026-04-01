@@ -56,6 +56,7 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 function createRuntimeConfigState(): RuntimeConfigState {
 	return {
 		selectedAgentId: "codex",
+		fallbackAgentId: null,
 		selectedShortcutLabel: null,
 		agentAutonomousModeEnabled: true,
 		readyForReviewNotificationsEnabled: true,
@@ -177,6 +178,52 @@ describe("createRuntimeApi runtime behavior", () => {
 			baseRef: "main",
 			ensure: true,
 		});
+	});
+
+	it("forwards an explicit task agent override to launch resolution", async () => {
+		taskWorktreeMocks.resolveTaskCwd.mockResolvedValue("/tmp/existing-worktree");
+		agentRegistryMocks.resolveAgentCommand.mockReturnValue({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "claude",
+			args: [],
+		});
+
+		const terminalManager = createTerminalManagerMock();
+		const api = createRuntimeApi({
+			getActiveWorkspaceId: vi.fn(() => "workspace-1"),
+			loadScopedRuntimeConfig: vi.fn(async () => createRuntimeConfigState()),
+			setActiveRuntimeConfig: vi.fn(),
+			getScopedTerminalManager: vi.fn(async () => terminalManager as never),
+			resolveInteractiveShellCommand: vi.fn(),
+			runCommand: vi.fn(),
+		});
+
+		const response = await api.startTaskSession(
+			{
+				workspaceId: "workspace-1",
+				workspacePath: "/tmp/repo",
+			},
+			{
+				taskId: "task-1",
+				baseRef: "main",
+				prompt: "Continue task",
+				agentId: "claude",
+			},
+		);
+
+		expect(response.ok).toBe(true);
+		expect(agentRegistryMocks.resolveAgentCommand).toHaveBeenCalledWith(
+			expect.objectContaining({ selectedAgentId: "codex" }),
+			"claude",
+		);
+		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentId: "claude",
+				binary: "claude",
+			}),
+		);
 	});
 
 	it("returns a setup error when no runnable local agent command is configured", async () => {

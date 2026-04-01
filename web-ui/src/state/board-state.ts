@@ -3,6 +3,7 @@ import { createShortTaskId } from "@runtime-task-id";
 import * as runtimeTaskState from "@runtime-task-state";
 
 import { createInitialBoardData } from "@/data/board-data";
+import type { RuntimeAgentId } from "@/runtime/types";
 import { isAllowedCrossColumnCardMove, type ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
 import {
 	type BoardCard,
@@ -23,6 +24,8 @@ export interface TaskDraft {
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: TaskAutoReviewMode;
 	images?: TaskImage[];
+	agentId?: RuntimeAgentId;
+	fallbackAgentId?: RuntimeAgentId | null;
 	baseRef: string;
 }
 
@@ -92,6 +95,27 @@ function normalizeTaskImages(rawImages: unknown): TaskImage[] | undefined {
 	return images.length > 0 ? images : undefined;
 }
 
+function normalizeTaskAgentId(rawAgentId: unknown): RuntimeAgentId | undefined {
+	if (rawAgentId === "claude" || rawAgentId === "codex") {
+		return rawAgentId;
+	}
+	return undefined;
+}
+
+function normalizeTaskFallbackAgentId(rawAgentId: unknown, preferredAgentId: RuntimeAgentId | undefined): RuntimeAgentId | null | undefined {
+	if (rawAgentId === undefined) {
+		return undefined;
+	}
+	if (rawAgentId === null) {
+		return null;
+	}
+	const normalizedAgentId = normalizeTaskAgentId(rawAgentId);
+	if (!normalizedAgentId || normalizedAgentId === preferredAgentId) {
+		return null;
+	}
+	return normalizedAgentId;
+}
+
 function normalizeCard(rawCard: unknown): BoardCard | null {
 	if (!rawCard || typeof rawCard !== "object") {
 		return null;
@@ -104,6 +128,8 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		autoReviewEnabled?: unknown;
 		autoReviewMode?: unknown;
 		images?: unknown;
+		agentId?: unknown;
+		fallbackAgentId?: unknown;
 		baseRef?: unknown;
 		createdAt?: unknown;
 		updatedAt?: unknown;
@@ -118,6 +144,8 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 	}
 
 	const now = Date.now();
+	const agentId = normalizeTaskAgentId(card.agentId);
+	const fallbackAgentId = normalizeTaskFallbackAgentId(card.fallbackAgentId, agentId);
 
 	return {
 		id: typeof card.id === "string" && card.id ? card.id : createShortTaskId(createBrowserUuid),
@@ -128,6 +156,8 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 			typeof card.autoReviewMode === "string" ? (card.autoReviewMode as TaskAutoReviewMode) : undefined,
 		),
 		images: normalizeTaskImages(card.images),
+		agentId,
+		fallbackAgentId,
 		baseRef,
 		createdAt: typeof card.createdAt === "number" ? card.createdAt : now,
 		updatedAt: typeof card.updatedAt === "number" ? card.updatedAt : now,
@@ -273,6 +303,8 @@ export function addTaskToColumnWithResult(
 			autoReviewEnabled: draft.autoReviewEnabled,
 			autoReviewMode: draft.autoReviewMode,
 			images: draft.images,
+			agentId: draft.agentId,
+			fallbackAgentId: draft.fallbackAgentId,
 			baseRef: draft.baseRef,
 		},
 		createBrowserUuid,
@@ -462,6 +494,8 @@ export function updateTask(board: BoardData, taskId: string, draft: TaskDraft): 
 				autoReviewEnabled: Boolean(draft.autoReviewEnabled),
 				autoReviewMode: resolveTaskAutoReviewMode(draft.autoReviewMode ?? DEFAULT_TASK_AUTO_REVIEW_MODE),
 				images: draft.images === undefined ? card.images : draft.images.length > 0 ? draft.images.map((image) => ({ ...image })) : undefined,
+				agentId: draft.agentId,
+				fallbackAgentId: draft.fallbackAgentId === undefined ? card.fallbackAgentId : draft.fallbackAgentId,
 				baseRef,
 				updatedAt: Date.now(),
 			};
@@ -487,6 +521,8 @@ export function disableTaskAutoReview(board: BoardData, taskId: string): { board
 		autoReviewEnabled: false,
 		autoReviewMode: DEFAULT_TASK_AUTO_REVIEW_MODE,
 		images: selection.card.images,
+		agentId: selection.card.agentId,
+		fallbackAgentId: selection.card.fallbackAgentId,
 		baseRef: selection.card.baseRef,
 	});
 }

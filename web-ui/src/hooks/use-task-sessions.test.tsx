@@ -32,6 +32,8 @@ function createTask(): BoardCard {
 		startInPlanMode: false,
 		autoReviewEnabled: false,
 		autoReviewMode: "commit",
+		agentId: undefined,
+		fallbackAgentId: undefined,
 		baseRef: "main",
 		createdAt: 1,
 		updatedAt: 1,
@@ -242,6 +244,71 @@ describe("useTaskSessions", () => {
 						mimeType: "image/png",
 					},
 				],
+			}),
+		);
+	});
+
+	it("prefers the task card agent when launching a session", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (latestSnapshot === null) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			await latestSnapshot?.startTaskSession({
+				...createTask(),
+				agentId: "claude",
+			});
+		});
+
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentId: "claude",
+			}),
+		);
+	});
+
+	it("lets a manual retry override the task card agent", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (latestSnapshot === null) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			await latestSnapshot?.startTaskSession(
+				{
+					...createTask(),
+					agentId: "claude",
+				},
+				{ agentId: "codex" },
+			);
+		});
+
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentId: "codex",
 			}),
 		);
 	});

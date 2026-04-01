@@ -18,6 +18,7 @@ export async function saveRuntimeConfig(
 	workspaceId: string | null,
 	nextConfig: {
 		selectedAgentId?: RuntimeAgentId;
+		fallbackAgentId?: RuntimeAgentId | null;
 		selectedShortcutLabel?: string | null;
 		agentAutonomousModeEnabled?: boolean;
 		shortcuts?: RuntimeProjectShortcut[];

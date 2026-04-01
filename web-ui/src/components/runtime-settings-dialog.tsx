@@ -287,6 +287,7 @@ export function RuntimeSettingsDialog({
 }): React.ReactElement {
 	const { config, isLoading, isSaving, save } = useRuntimeConfig(open, workspaceId, initialConfig);
 	const [selectedAgentId, setSelectedAgentId] = useState<RuntimeAgentId>("claude");
+	const [fallbackAgentId, setFallbackAgentId] = useState<RuntimeAgentId | null>(null);
 	const [agentAutonomousModeEnabled, setAgentAutonomousModeEnabled] = useState(true);
 	const [readyForReviewNotificationsEnabled, setReadyForReviewNotificationsEnabled] = useState(true);
 	const [notificationPermission, setNotificationPermission] = useState<BrowserNotificationPermission>("unsupported");
@@ -348,9 +349,11 @@ export function RuntimeSettingsDialog({
 	}, [agentAutonomousModeEnabled, config?.agents]);
 	const displayedAgents = useMemo(() => supportedAgents, [supportedAgents]);
 	const configuredAgentId = config?.selectedAgentId ?? null;
+	const configuredFallbackAgentId = config?.fallbackAgentId ?? null;
 	const firstInstalledAgentId = displayedAgents.find((agent) => agent.installed)?.id;
-	const fallbackAgentId = firstInstalledAgentId ?? displayedAgents[0]?.id ?? "claude";
-	const initialSelectedAgentId = configuredAgentId ?? fallbackAgentId;
+	const fallbackSelectedAgentId = firstInstalledAgentId ?? displayedAgents[0]?.id ?? "claude";
+	const initialSelectedAgentId = configuredAgentId ?? fallbackSelectedAgentId;
+	const initialFallbackAgentId = configuredFallbackAgentId;
 	const initialAgentAutonomousModeEnabled = config?.agentAutonomousModeEnabled ?? true;
 	const initialReadyForReviewNotificationsEnabled = config?.readyForReviewNotificationsEnabled ?? true;
 	const initialShortcuts = config?.shortcuts ?? [];
@@ -361,6 +364,9 @@ export function RuntimeSettingsDialog({
 			return false;
 		}
 		if (selectedAgentId !== initialSelectedAgentId) {
+			return true;
+		}
+		if (fallbackAgentId !== initialFallbackAgentId) {
 			return true;
 		}
 		if (agentAutonomousModeEnabled !== initialAgentAutonomousModeEnabled) {
@@ -387,6 +393,7 @@ export function RuntimeSettingsDialog({
 		commitPromptTemplate,
 		config,
 		initialAgentAutonomousModeEnabled,
+		initialFallbackAgentId,
 		initialCommitPromptTemplate,
 		initialOpenPrPromptTemplate,
 		initialReadyForReviewNotificationsEnabled,
@@ -394,6 +401,7 @@ export function RuntimeSettingsDialog({
 		initialShortcuts,
 		openPrPromptTemplate,
 		readyForReviewNotificationsEnabled,
+		fallbackAgentId,
 		selectedAgentId,
 		shortcuts,
 	]);
@@ -402,7 +410,8 @@ export function RuntimeSettingsDialog({
 		if (!open) {
 			return;
 		}
-		setSelectedAgentId(configuredAgentId ?? fallbackAgentId);
+		setSelectedAgentId(configuredAgentId ?? fallbackSelectedAgentId);
+		setFallbackAgentId(config?.fallbackAgentId ?? null);
 		setAgentAutonomousModeEnabled(config?.agentAutonomousModeEnabled ?? true);
 		setReadyForReviewNotificationsEnabled(config?.readyForReviewNotificationsEnabled ?? true);
 		setShortcuts(config?.shortcuts ?? []);
@@ -411,12 +420,13 @@ export function RuntimeSettingsDialog({
 		setSaveError(null);
 	}, [
 		config?.agentAutonomousModeEnabled,
+		config?.fallbackAgentId,
 		config?.commitPromptTemplate,
 		config?.openPrPromptTemplate,
 		config?.readyForReviewNotificationsEnabled,
 		config?.selectedAgentId,
 		config?.shortcuts,
-		fallbackAgentId,
+		fallbackSelectedAgentId,
 		open,
 	]);
 
@@ -506,6 +516,14 @@ export function RuntimeSettingsDialog({
 			setSaveError("Selected agent is not installed. Install it first or choose an installed agent.");
 			return;
 		}
+		const normalizedFallbackAgentId = fallbackAgentId === selectedAgentId ? null : fallbackAgentId;
+		if (normalizedFallbackAgentId) {
+			const selectedFallbackAgent = displayedAgents.find((agent) => agent.id === normalizedFallbackAgentId);
+			if (!selectedFallbackAgent || selectedFallbackAgent.installed !== true) {
+				setSaveError("Fallback agent is not installed. Install it first or clear the fallback.");
+				return;
+			}
+		}
 		const shouldRequestNotificationPermission =
 			!initialReadyForReviewNotificationsEnabled &&
 			readyForReviewNotificationsEnabled &&
@@ -516,6 +534,7 @@ export function RuntimeSettingsDialog({
 		}
 		const saved = await save({
 			selectedAgentId,
+			fallbackAgentId: normalizedFallbackAgentId,
 			agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled,
 			shortcuts,
@@ -579,6 +598,34 @@ export function RuntimeSettingsDialog({
 				{config === null ? (
 					<p className="text-text-secondary py-2">Checking which CLIs are installed for this project...</p>
 				) : null}
+				<div className="mt-3">
+					<span className="mb-1 block text-[11px] text-text-secondary">Manual retry fallback</span>
+					<div className="relative inline-flex min-w-[240px] max-w-full">
+						<select
+							value={fallbackAgentId ?? ""}
+							onChange={(event) => {
+								const nextValue = event.target.value;
+								setFallbackAgentId(nextValue === "" ? null : (nextValue as RuntimeAgentId));
+							}}
+							disabled={controlsDisabled}
+							className="h-8 w-full appearance-none rounded-md border border-border bg-surface-2 pl-2 pr-7 text-[13px] text-text-primary focus:border-border-focus focus:outline-none disabled:opacity-40"
+						>
+							<option value="">No fallback</option>
+							{displayedAgents.map((agent) => (
+								<option key={agent.id} value={agent.id} disabled={agent.installed !== true}>
+									{agent.installed ? agent.label : `${agent.label} (not installed)`}
+								</option>
+							))}
+						</select>
+						<ChevronDown
+							size={14}
+							className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary"
+						/>
+					</div>
+					<p className="mt-1 mb-0 text-[12px] text-text-secondary">
+						Used as the first suggested alternate when retrying a failed or interrupted card.
+					</p>
+				</div>
 				<label
 					htmlFor={bypassPermissionsCheckboxId}
 					className="flex items-center gap-2 text-[13px] text-text-primary mt-2 cursor-pointer"

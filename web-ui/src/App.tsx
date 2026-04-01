@@ -275,6 +275,10 @@ export default function App(): ReactElement {
 		isNewTaskStartInPlanModeDisabled,
 		newTaskBranchRef,
 		setNewTaskBranchRef,
+		newTaskAgentPreference,
+		setNewTaskAgentPreference,
+		newTaskFallbackAgentPreference,
+		setNewTaskFallbackAgentPreference,
 		editingTaskId,
 		editTaskPrompt,
 		setEditTaskPrompt,
@@ -289,6 +293,10 @@ export default function App(): ReactElement {
 		isEditTaskStartInPlanModeDisabled,
 		editTaskBranchRef,
 		setEditTaskBranchRef,
+		editTaskAgentPreference,
+		setEditTaskAgentPreference,
+		editTaskFallbackAgentPreference,
+		setEditTaskFallbackAgentPreference,
 		handleOpenCreateTask,
 		handleCancelCreateTask,
 		handleOpenEditTask,
@@ -304,7 +312,7 @@ export default function App(): ReactElement {
 		currentProjectId,
 		createTaskBranchOptions,
 		defaultTaskBranchRef,
-		selectedAgentId: runtimeProjectConfig?.selectedAgentId ?? null,
+		runtimeConfig: runtimeProjectConfig ?? null,
 		setSelectedTaskId,
 		queueTaskStartAfterEdit,
 	});
@@ -549,6 +557,7 @@ export default function App(): ReactElement {
 		handleMoveToTrash,
 		handleMoveReviewCardToTrash,
 		handleRestoreTaskFromTrash,
+		handleRetryTaskWithAgent,
 		handleCancelAutomaticTaskAction,
 		handleOpenClearTrash,
 		handleConfirmClearTrash,
@@ -709,9 +718,14 @@ export default function App(): ReactElement {
 			autoReviewMode={editTaskAutoReviewMode}
 			onAutoReviewModeChange={setEditTaskAutoReviewMode}
 			workspaceId={currentProjectId}
+			runtimeConfig={runtimeProjectConfig ?? null}
 			branchRef={editTaskBranchRef}
 			branchOptions={createTaskBranchOptions}
 			onBranchRefChange={setEditTaskBranchRef}
+			agentPreference={editTaskAgentPreference}
+			onAgentPreferenceChange={setEditTaskAgentPreference}
+			fallbackAgentPreference={editTaskFallbackAgentPreference}
+			onFallbackAgentPreferenceChange={setEditTaskFallbackAgentPreference}
 			mode="edit"
 			idPrefix={`inline-edit-task-${editingTaskId}`}
 		/>
@@ -919,6 +933,7 @@ export default function App(): ReactElement {
 							<CardDetailView
 								selection={selectedCard}
 								currentProjectId={currentProjectId}
+								runtimeConfig={runtimeProjectConfig ?? null}
 								workspacePath={workspacePath}
 								sessionSummary={detailSession}
 								taskSessions={sessions}
@@ -945,6 +960,7 @@ export default function App(): ReactElement {
 								moveToTrashLoadingById={moveToTrashLoadingById}
 								onMoveReviewCardToTrash={handleMoveReviewCardToTrash}
 								onRestoreTaskFromTrash={handleRestoreTaskFromTrash}
+								onRetryTaskWithAgent={handleRetryTaskWithAgent}
 								onCancelAutomaticTaskAction={handleCancelAutomaticTaskAction}
 								onAddReviewComments={(taskId: string, text: string) => {
 									void handleAddReviewComments(taskId, text);
@@ -1021,9 +1037,14 @@ export default function App(): ReactElement {
 				autoReviewMode={newTaskAutoReviewMode}
 				onAutoReviewModeChange={setNewTaskAutoReviewMode}
 				workspaceId={currentProjectId}
+				runtimeConfig={runtimeProjectConfig ?? null}
 				branchRef={newTaskBranchRef}
 				branchOptions={createTaskBranchOptions}
 				onBranchRefChange={setNewTaskBranchRef}
+				agentPreference={newTaskAgentPreference}
+				onAgentPreferenceChange={setNewTaskAgentPreference}
+				fallbackAgentPreference={newTaskFallbackAgentPreference}
+				onFallbackAgentPreferenceChange={setNewTaskFallbackAgentPreference}
 			/>
 			<ClearTrashDialog
 				open={isClearTrashDialogOpen}

@@ -1,4 +1,5 @@
 import type {
+	RuntimeAgentId,
 	RuntimeBoardCard,
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
@@ -14,6 +15,8 @@ export interface RuntimeCreateTaskInput {
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: RuntimeTaskAutoReviewMode;
 	images?: RuntimeTaskImage[];
+	agentId?: RuntimeAgentId;
+	fallbackAgentId?: RuntimeAgentId | null;
 	baseRef: string;
 }
 
@@ -23,6 +26,8 @@ export interface RuntimeUpdateTaskInput {
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: RuntimeTaskAutoReviewMode;
 	images?: RuntimeTaskImage[];
+	agentId?: RuntimeAgentId;
+	fallbackAgentId?: RuntimeAgentId | null;
 	baseRef: string;
 }
 
@@ -36,6 +41,20 @@ function normalizeTaskAutoReviewMode(value: RuntimeTaskAutoReviewMode | null | u
 // Copy image metadata so board tasks do not retain caller-owned array or object references.
 function cloneTaskImages(images?: RuntimeTaskImage[]): RuntimeTaskImage[] | undefined {
 	return images && images.length > 0 ? images.map((image) => ({ ...image })) : undefined;
+}
+
+function normalizeTaskAgentId(agentId: RuntimeAgentId | null | undefined): RuntimeAgentId | undefined {
+	return agentId === "claude" || agentId === "codex" ? agentId : undefined;
+}
+
+function normalizeTaskFallbackAgentId(
+	agentId: RuntimeAgentId | null | undefined,
+	preferredAgentId: RuntimeAgentId | undefined,
+): RuntimeAgentId | null {
+	if (agentId !== "claude" && agentId !== "codex") {
+		return null;
+	}
+	return agentId === preferredAgentId ? null : agentId;
 }
 
 export interface RuntimeCreateTaskResult {
@@ -272,6 +291,7 @@ export function addTaskToColumn(
 		throw new Error("Task baseRef is required.");
 	}
 	const existingIds = collectExistingTaskIds(board);
+	const agentId = normalizeTaskAgentId(input.agentId);
 	const task: RuntimeBoardCard = {
 		id: createUniqueTaskId(existingIds, randomUuid),
 		prompt,
@@ -279,6 +299,8 @@ export function addTaskToColumn(
 		autoReviewEnabled: Boolean(input.autoReviewEnabled),
 		autoReviewMode: normalizeTaskAutoReviewMode(input.autoReviewMode),
 		images: cloneTaskImages(input.images),
+		agentId,
+		fallbackAgentId: normalizeTaskFallbackAgentId(input.fallbackAgentId, agentId),
 		baseRef,
 		createdAt: now,
 		updatedAt: now,
@@ -585,6 +607,7 @@ export function updateTask(
 				return card;
 			}
 			columnUpdated = true;
+			const preferredAgentId = normalizeTaskAgentId(input.agentId);
 			updatedTask = {
 				...card,
 				prompt,
@@ -592,6 +615,11 @@ export function updateTask(
 				autoReviewEnabled: Boolean(input.autoReviewEnabled),
 				autoReviewMode: normalizeTaskAutoReviewMode(input.autoReviewMode),
 				images: input.images === undefined ? card.images : cloneTaskImages(input.images),
+				agentId: preferredAgentId,
+				fallbackAgentId:
+					input.fallbackAgentId === undefined
+						? card.fallbackAgentId
+						: normalizeTaskFallbackAgentId(input.fallbackAgentId, preferredAgentId),
 				baseRef,
 				updatedAt: now,
 			};

@@ -124,7 +124,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 						});
 				const shouldCaptureTurnCheckpoint = !body.resumeFromTrash && !isHomeAgentSessionId(body.taskId);
 
-				const resolved = resolveAgentCommand(scopedRuntimeConfig);
+				const resolved = resolveAgentCommand(scopedRuntimeConfig, body.agentId);
 				if (!resolved) {
 					return {
 						ok: false,
