@@ -47,6 +47,16 @@ npm run link
 fs-kanban
 ```
 
+### Remote Access
+
+If you want to open FS Kanban from another machine over Tailscale or another private network, keep the server bind host and the URL host separate:
+
+```bash
+fs-kanban --host 0.0.0.0 --advertise-host foundation-ea.tailnet.ts.net
+```
+
+You can also use the Tailscale `100.x.x.x` address instead of a MagicDNS hostname. `--host` controls which interface the server listens on; `--advertise-host` controls the URL that FS Kanban prints and tries to open.
+
 ### Development
 
 Runtime server:
