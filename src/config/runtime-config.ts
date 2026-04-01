@@ -15,6 +15,7 @@ import { areRuntimeProjectShortcutsEqual } from "./shortcut-utils.js";
 
 interface RuntimeGlobalConfigFileShape {
 	selectedAgentId?: RuntimeAgentId;
+	fallbackAgentId?: RuntimeAgentId | null;
 	selectedShortcutLabel?: string;
 	agentAutonomousModeEnabled?: boolean;
 	readyForReviewNotificationsEnabled?: boolean;
@@ -30,6 +31,7 @@ export interface RuntimeConfigState {
 	globalConfigPath: string;
 	projectConfigPath: string | null;
 	selectedAgentId: RuntimeAgentId;
+	fallbackAgentId: RuntimeAgentId | null;
 	selectedShortcutLabel: string | null;
 	agentAutonomousModeEnabled: boolean;
 	readyForReviewNotificationsEnabled: boolean;
@@ -42,6 +44,7 @@ export interface RuntimeConfigState {
 
 export interface RuntimeConfigUpdateInput {
 	selectedAgentId?: RuntimeAgentId;
+	fallbackAgentId?: RuntimeAgentId | null;
 	selectedShortcutLabel?: string | null;
 	agentAutonomousModeEnabled?: boolean;
 	readyForReviewNotificationsEnabled?: boolean;
@@ -122,6 +125,19 @@ function normalizeAgentId(agentId: RuntimeAgentId | string | null | undefined): 
 		return agentId;
 	}
 	return DEFAULT_AGENT_ID;
+}
+
+function normalizeFallbackAgentId(
+	agentId: RuntimeAgentId | string | null | undefined,
+	selectedAgentId: RuntimeAgentId,
+): RuntimeAgentId | null {
+	if (agentId !== "claude" && agentId !== "codex") {
+		return null;
+	}
+	if (!isRuntimeAgentLaunchSupported(agentId) || agentId === selectedAgentId) {
+		return null;
+	}
+	return agentId;
 }
 
 function pickBestInstalledAgentId(): RuntimeAgentId | null {
@@ -266,6 +282,10 @@ function toRuntimeConfigState({
 		globalConfigPath,
 		projectConfigPath,
 		selectedAgentId: normalizeAgentId(globalConfig?.selectedAgentId),
+		fallbackAgentId: normalizeFallbackAgentId(
+			globalConfig?.fallbackAgentId,
+			normalizeAgentId(globalConfig?.selectedAgentId),
+		),
 		selectedShortcutLabel: normalizeShortcutLabel(globalConfig?.selectedShortcutLabel),
 		agentAutonomousModeEnabled: normalizeBoolean(
 			globalConfig?.agentAutonomousModeEnabled,
@@ -299,6 +319,7 @@ async function writeRuntimeGlobalConfigFile(
 	configPath: string,
 	config: {
 		selectedAgentId?: RuntimeAgentId;
+		fallbackAgentId?: RuntimeAgentId | null;
 		selectedShortcutLabel?: string | null;
 		agentAutonomousModeEnabled?: boolean;
 		readyForReviewNotificationsEnabled?: boolean;
@@ -310,6 +331,14 @@ async function writeRuntimeGlobalConfigFile(
 	const selectedAgentId = config.selectedAgentId === undefined ? undefined : normalizeAgentId(config.selectedAgentId);
 	const existingSelectedAgentId = hasOwnKey(existing, "selectedAgentId")
 		? normalizeAgentId(existing?.selectedAgentId)
+		: undefined;
+	const nextSelectedAgentId = selectedAgentId ?? existingSelectedAgentId ?? DEFAULT_AGENT_ID;
+	const fallbackAgentId =
+		config.fallbackAgentId === undefined
+			? undefined
+			: normalizeFallbackAgentId(config.fallbackAgentId, nextSelectedAgentId);
+	const existingFallbackAgentId = hasOwnKey(existing, "fallbackAgentId")
+		? normalizeFallbackAgentId(existing?.fallbackAgentId, nextSelectedAgentId)
 		: undefined;
 	const selectedShortcutLabel =
 		config.selectedShortcutLabel === undefined ? undefined : normalizeShortcutLabel(config.selectedShortcutLabel);
@@ -340,6 +369,13 @@ async function writeRuntimeGlobalConfigFile(
 		}
 	} else if (existingSelectedAgentId !== undefined) {
 		payload.selectedAgentId = existingSelectedAgentId;
+	}
+	if (fallbackAgentId !== undefined) {
+		if (fallbackAgentId !== null) {
+			payload.fallbackAgentId = fallbackAgentId;
+		}
+	} else if (existingFallbackAgentId !== undefined && existingFallbackAgentId !== null) {
+		payload.fallbackAgentId = existingFallbackAgentId;
 	}
 	if (selectedShortcutLabel !== undefined) {
 		if (selectedShortcutLabel) {
@@ -442,6 +478,7 @@ function createRuntimeConfigStateFromValues(input: {
 	globalConfigPath: string;
 	projectConfigPath: string | null;
 	selectedAgentId: RuntimeAgentId;
+	fallbackAgentId: RuntimeAgentId | null;
 	selectedShortcutLabel: string | null;
 	agentAutonomousModeEnabled: boolean;
 	readyForReviewNotificationsEnabled: boolean;
@@ -453,6 +490,7 @@ function createRuntimeConfigStateFromValues(input: {
 		globalConfigPath: input.globalConfigPath,
 		projectConfigPath: input.projectConfigPath,
 		selectedAgentId: normalizeAgentId(input.selectedAgentId),
+		fallbackAgentId: normalizeFallbackAgentId(input.fallbackAgentId, normalizeAgentId(input.selectedAgentId)),
 		selectedShortcutLabel: normalizeShortcutLabel(input.selectedShortcutLabel),
 		agentAutonomousModeEnabled: normalizeBoolean(
 			input.agentAutonomousModeEnabled,
@@ -475,6 +513,7 @@ export function toGlobalRuntimeConfigState(current: RuntimeConfigState): Runtime
 		globalConfigPath: current.globalConfigPath,
 		projectConfigPath: null,
 		selectedAgentId: current.selectedAgentId,
+		fallbackAgentId: current.fallbackAgentId,
 		selectedShortcutLabel: current.selectedShortcutLabel,
 		agentAutonomousModeEnabled: current.agentAutonomousModeEnabled,
 		readyForReviewNotificationsEnabled: current.readyForReviewNotificationsEnabled,
@@ -510,6 +549,7 @@ export async function saveRuntimeConfig(
 	cwd: string,
 	config: {
 		selectedAgentId: RuntimeAgentId;
+		fallbackAgentId: RuntimeAgentId | null;
 		selectedShortcutLabel: string | null;
 		agentAutonomousModeEnabled: boolean;
 		readyForReviewNotificationsEnabled: boolean;
@@ -522,6 +562,7 @@ export async function saveRuntimeConfig(
 	return await lockedFileSystem.withLocks(getRuntimeConfigLockRequests(cwd), async () => {
 		await writeRuntimeGlobalConfigFile(globalConfigPath, {
 			selectedAgentId: config.selectedAgentId,
+			fallbackAgentId: config.fallbackAgentId,
 			selectedShortcutLabel: config.selectedShortcutLabel,
 			agentAutonomousModeEnabled: config.agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled: config.readyForReviewNotificationsEnabled,
@@ -533,6 +574,7 @@ export async function saveRuntimeConfig(
 			globalConfigPath,
 			projectConfigPath,
 			selectedAgentId: config.selectedAgentId,
+			fallbackAgentId: config.fallbackAgentId,
 			selectedShortcutLabel: config.selectedShortcutLabel,
 			agentAutonomousModeEnabled: config.agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled: config.readyForReviewNotificationsEnabled,
@@ -552,6 +594,10 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 		}
 		const nextConfig = {
 			selectedAgentId: updates.selectedAgentId ?? current.selectedAgentId,
+			fallbackAgentId:
+				updates.fallbackAgentId === undefined
+					? current.fallbackAgentId
+					: normalizeFallbackAgentId(updates.fallbackAgentId, updates.selectedAgentId ?? current.selectedAgentId),
 			selectedShortcutLabel:
 				updates.selectedShortcutLabel === undefined ? current.selectedShortcutLabel : updates.selectedShortcutLabel,
 			agentAutonomousModeEnabled: updates.agentAutonomousModeEnabled ?? current.agentAutonomousModeEnabled,
@@ -564,6 +610,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 
 		const hasChanges =
 			nextConfig.selectedAgentId !== current.selectedAgentId ||
+			nextConfig.fallbackAgentId !== current.fallbackAgentId ||
 			nextConfig.selectedShortcutLabel !== current.selectedShortcutLabel ||
 			nextConfig.agentAutonomousModeEnabled !== current.agentAutonomousModeEnabled ||
 			nextConfig.readyForReviewNotificationsEnabled !== current.readyForReviewNotificationsEnabled ||
@@ -577,6 +624,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 
 		await writeRuntimeGlobalConfigFile(globalConfigPath, {
 			selectedAgentId: nextConfig.selectedAgentId,
+			fallbackAgentId: nextConfig.fallbackAgentId,
 			selectedShortcutLabel: nextConfig.selectedShortcutLabel,
 			agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
@@ -590,6 +638,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			globalConfigPath,
 			projectConfigPath,
 			selectedAgentId: nextConfig.selectedAgentId,
+			fallbackAgentId: nextConfig.fallbackAgentId,
 			selectedShortcutLabel: nextConfig.selectedShortcutLabel,
 			agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
 			readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
@@ -615,6 +664,10 @@ export async function updateGlobalRuntimeConfig(
 		async () => {
 			const nextConfig = {
 				selectedAgentId: updates.selectedAgentId ?? current.selectedAgentId,
+				fallbackAgentId:
+					updates.fallbackAgentId === undefined
+						? current.fallbackAgentId
+						: normalizeFallbackAgentId(updates.fallbackAgentId, updates.selectedAgentId ?? current.selectedAgentId),
 				selectedShortcutLabel:
 					updates.selectedShortcutLabel === undefined ? current.selectedShortcutLabel : updates.selectedShortcutLabel,
 				agentAutonomousModeEnabled: updates.agentAutonomousModeEnabled ?? current.agentAutonomousModeEnabled,
@@ -627,6 +680,7 @@ export async function updateGlobalRuntimeConfig(
 
 			const hasChanges =
 				nextConfig.selectedAgentId !== current.selectedAgentId ||
+				nextConfig.fallbackAgentId !== current.fallbackAgentId ||
 				nextConfig.selectedShortcutLabel !== current.selectedShortcutLabel ||
 				nextConfig.agentAutonomousModeEnabled !== current.agentAutonomousModeEnabled ||
 				nextConfig.readyForReviewNotificationsEnabled !== current.readyForReviewNotificationsEnabled ||
@@ -639,6 +693,7 @@ export async function updateGlobalRuntimeConfig(
 
 			await writeRuntimeGlobalConfigFile(globalConfigPath, {
 				selectedAgentId: nextConfig.selectedAgentId,
+				fallbackAgentId: nextConfig.fallbackAgentId,
 				selectedShortcutLabel: nextConfig.selectedShortcutLabel,
 				agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
 				readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
@@ -650,6 +705,7 @@ export async function updateGlobalRuntimeConfig(
 				globalConfigPath,
 				projectConfigPath: current.projectConfigPath,
 				selectedAgentId: nextConfig.selectedAgentId,
+				fallbackAgentId: nextConfig.fallbackAgentId,
 				selectedShortcutLabel: nextConfig.selectedShortcutLabel,
 				agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
 				readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,

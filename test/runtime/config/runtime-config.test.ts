@@ -293,6 +293,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 				const current = await loadRuntimeConfig(tempProject);
 				await saveRuntimeConfig(tempProject, {
 					selectedAgentId: "codex",
+					fallbackAgentId: null,
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
 					readyForReviewNotificationsEnabled: true,
@@ -336,6 +337,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 				const current = await loadRuntimeConfig(tempProject);
 				await saveRuntimeConfig(tempProject, {
 					selectedAgentId: "codex",
+					fallbackAgentId: null,
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
 					readyForReviewNotificationsEnabled: true,
@@ -363,6 +365,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 				const current = await loadRuntimeConfig(tempProject);
 				await saveRuntimeConfig(tempProject, {
 					selectedAgentId: "codex",
+					fallbackAgentId: null,
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
 					readyForReviewNotificationsEnabled: true,

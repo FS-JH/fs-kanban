@@ -20,13 +20,19 @@ import { useHotkeys } from "react-hotkeys-hook";
 
 import type { BranchSelectOption } from "@/components/branch-select-dropdown";
 import { BranchSelectDropdown } from "@/components/branch-select-dropdown";
+import { TaskAgentPreferenceFields } from "@/components/task-agent-preference-fields";
 import { TaskPromptComposer } from "@/components/task-prompt-composer";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { LocalStorageKey } from "@/storage/local-storage-store";
+import type { RuntimeConfigResponse } from "@/runtime/types";
 import type { TaskAutoReviewMode, TaskImage } from "@/types";
 import { isMacPlatform, pasteShortcutLabel } from "@/utils/platform";
 import { useRawLocalStorageValue } from "@/utils/react-use";
+import type {
+	TaskAgentPreferenceValue,
+	TaskFallbackAgentPreferenceValue,
+} from "@/utils/task-agent-preferences";
 
 
 const AUTO_REVIEW_MODE_OPTIONS: Array<{ value: TaskAutoReviewMode; label: string }> = [
@@ -107,9 +113,14 @@ export function TaskCreateDialog({
 	onAutoReviewModeChange,
 	startInPlanModeDisabled = false,
 	workspaceId,
+	runtimeConfig,
 	branchRef,
 	branchOptions,
 	onBranchRefChange,
+	agentPreference,
+	onAgentPreferenceChange,
+	fallbackAgentPreference,
+	onFallbackAgentPreferenceChange,
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -130,9 +141,14 @@ export function TaskCreateDialog({
 	onAutoReviewModeChange: (value: TaskAutoReviewMode) => void;
 	startInPlanModeDisabled?: boolean;
 	workspaceId: string | null;
+	runtimeConfig: RuntimeConfigResponse | null;
 	branchRef: string;
 	branchOptions: BranchSelectOption[];
 	onBranchRefChange: (value: string) => void;
+	agentPreference: TaskAgentPreferenceValue;
+	onAgentPreferenceChange: (value: TaskAgentPreferenceValue) => void;
+	fallbackAgentPreference: TaskFallbackAgentPreferenceValue;
+	onFallbackAgentPreferenceChange: (value: TaskFallbackAgentPreferenceValue) => void;
 }): ReactElement {
 	const [mode, setMode] = useState<"single" | "multi">("single");
 	const [createMore, setCreateMore] = useState(false);
@@ -491,19 +507,27 @@ export function TaskCreateDialog({
 						Start in plan mode
 					</label>
 
-					<div>
-						<span className="text-[11px] text-text-secondary block mb-1">Worktree base ref</span>
-						<BranchSelectDropdown
+				<div>
+					<span className="text-[11px] text-text-secondary block mb-1">Worktree base ref</span>
+					<BranchSelectDropdown
 							options={branchOptions}
 							selectedValue={branchRef}
 							onSelect={onBranchRefChange}
 							fill
 							size="sm"
-							emptyText="No branches detected"
-						/>
-					</div>
+						emptyText="No branches detected"
+					/>
+				</div>
 
-					<div className="flex items-center gap-2 flex-wrap">
+				<TaskAgentPreferenceFields
+					runtimeConfig={runtimeConfig}
+					preferredValue={agentPreference}
+					onPreferredChange={onAgentPreferenceChange}
+					fallbackValue={fallbackAgentPreference}
+					onFallbackChange={onFallbackAgentPreferenceChange}
+				/>
+
+				<div className="flex items-center gap-2 flex-wrap">
 						<label
 							htmlFor={autoReviewEnabledId}
 							className="flex items-center gap-2 text-[12px] text-text-primary cursor-pointer select-none"

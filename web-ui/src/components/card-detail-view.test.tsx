@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CardDetailView } from "@/components/card-detail-view";
+import type { RuntimeConfigResponse } from "@/runtime/types";
 import { TERMINAL_THEME_COLORS } from "@/terminal/theme-colors";
 import type { BoardCard, BoardColumn, CardSelection } from "@/types";
 
@@ -89,6 +90,26 @@ function createSelection(): CardSelection {
 		card,
 		column: columns[0]!,
 		allColumns: columns,
+	};
+}
+
+function createRuntimeConfig(selectedAgentId: RuntimeConfigResponse["selectedAgentId"]): RuntimeConfigResponse {
+	return {
+		selectedAgentId,
+		fallbackAgentId: null,
+		selectedShortcutLabel: null,
+		agentAutonomousModeEnabled: true,
+		effectiveCommand: selectedAgentId,
+		globalConfigPath: "/tmp/global-config.json",
+		projectConfigPath: "/tmp/project/.fs-kanban/config.json",
+		readyForReviewNotificationsEnabled: true,
+		detectedCommands: [selectedAgentId],
+		agents: [],
+		shortcuts: [],
+		commitPromptTemplate: "",
+		openPrPromptTemplate: "",
+		commitPromptTemplateDefault: "",
+		openPrPromptTemplateDefault: "",
 	};
 }
 
@@ -275,7 +296,7 @@ describe("CardDetailView", () => {
 				<CardDetailView
 					selection={createSelection()}
 					currentProjectId="workspace-1"
-					selectedAgentId="codex"
+					runtimeConfig={createRuntimeConfig("codex")}
 					sessionSummary={null}
 					taskSessions={{}}
 					onSessionSummary={() => {}}
@@ -299,7 +320,7 @@ describe("CardDetailView", () => {
 				<CardDetailView
 					selection={createSelection()}
 					currentProjectId="workspace-1"
-					selectedAgentId="claude"
+					runtimeConfig={createRuntimeConfig("claude")}
 					sessionSummary={{
 						taskId: "task-1",
 						state: "running",
@@ -340,7 +361,7 @@ describe("CardDetailView", () => {
 				<CardDetailView
 					selection={createSelection()}
 					currentProjectId="workspace-1"
-					selectedAgentId="claude"
+					runtimeConfig={createRuntimeConfig("claude")}
 					sessionSummary={null}
 					taskSessions={{}}
 					onSessionSummary={() => {}}
@@ -370,7 +391,7 @@ describe("CardDetailView", () => {
 				<CardDetailView
 					selection={createSelection()}
 					currentProjectId="workspace-1"
-					selectedAgentId="codex"
+					runtimeConfig={createRuntimeConfig("codex")}
 					sessionSummary={null}
 					taskSessions={{}}
 					onSessionSummary={() => {}}
@@ -404,7 +425,7 @@ describe("CardDetailView", () => {
 				<CardDetailView
 					selection={createSelection()}
 					currentProjectId="workspace-1"
-					selectedAgentId="codex"
+					runtimeConfig={createRuntimeConfig("codex")}
 					sessionSummary={null}
 					taskSessions={{}}
 					onSessionSummary={() => {}}

@@ -11,6 +11,7 @@ export interface UseRuntimeConfigResult {
 	refresh: () => void;
 	save: (nextConfig: {
 		selectedAgentId?: RuntimeAgentId;
+		fallbackAgentId?: RuntimeAgentId | null;
 		selectedShortcutLabel?: string | null;
 		agentAutonomousModeEnabled?: boolean;
 		shortcuts?: RuntimeProjectShortcut[];
@@ -78,6 +79,7 @@ export function useRuntimeConfig(
 	const save = useCallback(
 		async (nextConfig: {
 			selectedAgentId?: RuntimeAgentId;
+			fallbackAgentId?: RuntimeAgentId | null;
 			selectedShortcutLabel?: string | null;
 			agentAutonomousModeEnabled?: boolean;
 			shortcuts?: RuntimeProjectShortcut[];

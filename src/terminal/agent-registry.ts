@@ -80,8 +80,12 @@ function getCuratedDefinitions(runtimeConfig: RuntimeConfigState, detected: stri
 	});
 }
 
-export function resolveAgentCommand(runtimeConfig: RuntimeConfigState): ResolvedAgentCommand | null {
-	const selected = getRuntimeLaunchSupportedAgentCatalog().find((entry) => entry.id === runtimeConfig.selectedAgentId);
+export function resolveAgentCommand(
+	runtimeConfig: RuntimeConfigState,
+	requestedAgentId?: RuntimeAgentId | null,
+): ResolvedAgentCommand | null {
+	const targetAgentId = requestedAgentId ?? runtimeConfig.selectedAgentId;
+	const selected = getRuntimeLaunchSupportedAgentCatalog().find((entry) => entry.id === targetAgentId);
 	if (!selected) {
 		return null;
 	}
@@ -109,6 +113,7 @@ export function buildRuntimeConfigResponse(
 
 	return {
 		selectedAgentId: runtimeConfig.selectedAgentId,
+		fallbackAgentId: runtimeConfig.fallbackAgentId,
 		selectedShortcutLabel: runtimeConfig.selectedShortcutLabel,
 		agentAutonomousModeEnabled: runtimeConfig.agentAutonomousModeEnabled,
 		debugModeEnabled: isRuntimeDebugModeEnabled(),

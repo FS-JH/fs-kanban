@@ -7,11 +7,19 @@ import {
 	TASK_AUTO_REVIEW_MODE_STORAGE_KEY,
 	TASK_START_IN_PLAN_MODE_STORAGE_KEY,
 } from "@/hooks/app-utils";
-import type { RuntimeAgentId } from "@/runtime/types";
+import type { RuntimeConfigResponse } from "@/runtime/types";
 import { addTaskToColumnWithResult, findCardSelection, updateTask } from "@/state/board-state";
 import type { BoardCard, BoardData, TaskAutoReviewMode, TaskImage } from "@/types";
 import { resolveTaskAutoReviewMode } from "@/types";
 import { useBooleanLocalStorageValue, useRawLocalStorageValue } from "@/utils/react-use";
+import {
+	fromTaskAgentPreferenceValue,
+	fromTaskFallbackAgentPreferenceValue,
+	toTaskAgentPreferenceValue,
+	toTaskFallbackAgentPreferenceValue,
+	type TaskAgentPreferenceValue,
+	type TaskFallbackAgentPreferenceValue,
+} from "@/utils/task-agent-preferences";
 
 interface UseTaskEditorInput {
 	board: BoardData;
@@ -19,7 +27,7 @@ interface UseTaskEditorInput {
 	currentProjectId: string | null;
 	createTaskBranchOptions: Array<{ value: string; label: string }>;
 	defaultTaskBranchRef: string;
-	selectedAgentId?: RuntimeAgentId | null;
+	runtimeConfig?: RuntimeConfigResponse | null;
 	setSelectedTaskId: Dispatch<SetStateAction<string | null>>;
 	queueTaskStartAfterEdit?: (taskId: string) => void;
 }
@@ -47,6 +55,10 @@ export interface UseTaskEditorResult {
 	isNewTaskStartInPlanModeDisabled: boolean;
 	newTaskBranchRef: string;
 	setNewTaskBranchRef: Dispatch<SetStateAction<string>>;
+	newTaskAgentPreference: TaskAgentPreferenceValue;
+	setNewTaskAgentPreference: Dispatch<SetStateAction<TaskAgentPreferenceValue>>;
+	newTaskFallbackAgentPreference: TaskFallbackAgentPreferenceValue;
+	setNewTaskFallbackAgentPreference: Dispatch<SetStateAction<TaskFallbackAgentPreferenceValue>>;
 	editingTaskId: string | null;
 	editTaskPrompt: string;
 	setEditTaskPrompt: Dispatch<SetStateAction<string>>;
@@ -61,6 +73,10 @@ export interface UseTaskEditorResult {
 	isEditTaskStartInPlanModeDisabled: boolean;
 	editTaskBranchRef: string;
 	setEditTaskBranchRef: Dispatch<SetStateAction<string>>;
+	editTaskAgentPreference: TaskAgentPreferenceValue;
+	setEditTaskAgentPreference: Dispatch<SetStateAction<TaskAgentPreferenceValue>>;
+	editTaskFallbackAgentPreference: TaskFallbackAgentPreferenceValue;
+	setEditTaskFallbackAgentPreference: Dispatch<SetStateAction<TaskFallbackAgentPreferenceValue>>;
 	handleOpenCreateTask: () => void;
 	handleCancelCreateTask: () => void;
 	handleOpenEditTask: (task: BoardCard, options?: OpenEditTaskOptions) => void;
@@ -78,7 +94,7 @@ export function useTaskEditor({
 	currentProjectId,
 	createTaskBranchOptions,
 	defaultTaskBranchRef,
-	selectedAgentId: _selectedAgentId,
+	runtimeConfig: _runtimeConfig,
 	setSelectedTaskId,
 	queueTaskStartAfterEdit,
 }: UseTaskEditorInput): UseTaskEditorResult {
@@ -98,6 +114,9 @@ export function useTaskEditor({
 		"commit",
 		normalizeStoredTaskAutoReviewMode,
 	);
+	const [newTaskAgentPreference, setNewTaskAgentPreference] = useState<TaskAgentPreferenceValue>("inherit");
+	const [newTaskFallbackAgentPreference, setNewTaskFallbackAgentPreference] =
+		useState<TaskFallbackAgentPreferenceValue>("inherit");
 	const isNewTaskStartInPlanModeDisabled = newTaskAutoReviewEnabled && newTaskAutoReviewMode === "move_to_trash";
 	const [newTaskBranchRef, setNewTaskBranchRef] = useState("");
 	const [lastCreatedTaskBranchByProjectId, setLastCreatedTaskBranchByProjectId] = useState<Record<string, string>>({});
@@ -107,6 +126,9 @@ export function useTaskEditor({
 	const [editTaskStartInPlanMode, setEditTaskStartInPlanMode] = useState(false);
 	const [editTaskAutoReviewEnabled, setEditTaskAutoReviewEnabled] = useState(false);
 	const [editTaskAutoReviewMode, setEditTaskAutoReviewMode] = useState<TaskAutoReviewMode>("commit");
+	const [editTaskAgentPreference, setEditTaskAgentPreference] = useState<TaskAgentPreferenceValue>("inherit");
+	const [editTaskFallbackAgentPreference, setEditTaskFallbackAgentPreference] =
+		useState<TaskFallbackAgentPreferenceValue>("inherit");
 	const isEditTaskStartInPlanModeDisabled = editTaskAutoReviewEnabled && editTaskAutoReviewMode === "move_to_trash";
 	const [editTaskBranchRef, setEditTaskBranchRef] = useState("");
 
@@ -180,6 +202,8 @@ export function useTaskEditor({
 			setEditTaskStartInPlanMode(false);
 			setEditTaskAutoReviewEnabled(false);
 			setEditTaskAutoReviewMode("commit");
+			setEditTaskAgentPreference("inherit");
+			setEditTaskFallbackAgentPreference("inherit");
 			setEditTaskImages([]);
 			setEditTaskBranchRef("");
 		}
@@ -189,6 +213,8 @@ export function useTaskEditor({
 		setEditingTaskId(null);
 		setEditTaskPrompt("");
 		setEditTaskImages([]);
+		setEditTaskAgentPreference("inherit");
+		setEditTaskFallbackAgentPreference("inherit");
 		setIsInlineTaskCreateOpen(true);
 	}, []);
 
@@ -196,6 +222,8 @@ export function useTaskEditor({
 		setIsInlineTaskCreateOpen(false);
 		setNewTaskPrompt("");
 		setNewTaskImages([]);
+		setNewTaskAgentPreference("inherit");
+		setNewTaskFallbackAgentPreference("inherit");
 		setNewTaskBranchRef(resolvedDefaultTaskBranchRef);
 	}, [resolvedDefaultTaskBranchRef]);
 
@@ -214,6 +242,8 @@ export function useTaskEditor({
 			setEditTaskStartInPlanMode(task.startInPlanMode);
 			setEditTaskAutoReviewEnabled(task.autoReviewEnabled === true);
 			setEditTaskAutoReviewMode(resolveTaskAutoReviewMode(task.autoReviewMode));
+			setEditTaskAgentPreference(toTaskAgentPreferenceValue(task.agentId));
+			setEditTaskFallbackAgentPreference(toTaskFallbackAgentPreferenceValue(task.fallbackAgentId));
 			const fallbackBranch = task.baseRef || resolvedDefaultTaskBranchRef;
 			setEditTaskBranchRef(fallbackBranch);
 		},
@@ -226,6 +256,8 @@ export function useTaskEditor({
 		setEditTaskStartInPlanMode(false);
 		setEditTaskAutoReviewEnabled(false);
 		setEditTaskAutoReviewMode("commit");
+		setEditTaskAgentPreference("inherit");
+		setEditTaskFallbackAgentPreference("inherit");
 		setEditTaskImages([]);
 		setEditTaskBranchRef("");
 	}, []);
@@ -252,6 +284,8 @@ export function useTaskEditor({
 				autoReviewEnabled: editTaskAutoReviewEnabled,
 				autoReviewMode: editTaskAutoReviewMode,
 				images: editTaskImages,
+				agentId: fromTaskAgentPreferenceValue(editTaskAgentPreference),
+				fallbackAgentId: fromTaskFallbackAgentPreferenceValue(editTaskFallbackAgentPreference),
 				baseRef,
 			});
 			return updated.updated ? updated.board : currentBoard;
@@ -260,12 +294,16 @@ export function useTaskEditor({
 		setEditTaskPrompt("");
 		setEditTaskAutoReviewEnabled(false);
 		setEditTaskAutoReviewMode("commit");
+		setEditTaskAgentPreference("inherit");
+		setEditTaskFallbackAgentPreference("inherit");
 		setEditTaskImages([]);
 		return savedTaskId;
 	}, [
+		editTaskAgentPreference,
 		editTaskAutoReviewEnabled,
 		editTaskAutoReviewMode,
 		editTaskBranchRef,
+		editTaskFallbackAgentPreference,
 		editTaskPrompt,
 		editTaskImages,
 		editTaskStartInPlanMode,
@@ -297,6 +335,8 @@ export function useTaskEditor({
 			autoReviewEnabled: newTaskAutoReviewEnabled,
 			autoReviewMode: newTaskAutoReviewMode,
 			images: newTaskImages,
+			agentId: fromTaskAgentPreferenceValue(newTaskAgentPreference),
+			fallbackAgentId: fromTaskFallbackAgentPreferenceValue(newTaskFallbackAgentPreference),
 			baseRef,
 		});
 		setBoard(created.board);
@@ -308,6 +348,8 @@ export function useTaskEditor({
 		}
 		setNewTaskPrompt("");
 		setNewTaskImages([]);
+		setNewTaskAgentPreference("inherit");
+		setNewTaskFallbackAgentPreference("inherit");
 		setNewTaskBranchRef(baseRef);
 		if (!options?.keepDialogOpen) {
 			setIsInlineTaskCreateOpen(false);
@@ -318,7 +360,9 @@ export function useTaskEditor({
 		currentProjectId,
 		newTaskAutoReviewEnabled,
 		newTaskAutoReviewMode,
+		newTaskAgentPreference,
 		newTaskBranchRef,
+		newTaskFallbackAgentPreference,
 		newTaskImages,
 		newTaskPrompt,
 		newTaskStartInPlanMode,
@@ -344,6 +388,8 @@ export function useTaskEditor({
 				autoReviewEnabled: newTaskAutoReviewEnabled,
 				autoReviewMode: newTaskAutoReviewMode,
 				images: newTaskImages,
+				agentId: fromTaskAgentPreferenceValue(newTaskAgentPreference),
+				fallbackAgentId: fromTaskFallbackAgentPreferenceValue(newTaskFallbackAgentPreference),
 				baseRef,
 			});
 			updatedBoard = created.board;
@@ -358,6 +404,8 @@ export function useTaskEditor({
 		}
 		setNewTaskPrompt("");
 		setNewTaskImages([]);
+		setNewTaskAgentPreference("inherit");
+		setNewTaskFallbackAgentPreference("inherit");
 		setNewTaskBranchRef(baseRef);
 		if (!options?.keepDialogOpen) {
 			setIsInlineTaskCreateOpen(false);
@@ -368,7 +416,9 @@ export function useTaskEditor({
 		currentProjectId,
 		newTaskAutoReviewEnabled,
 		newTaskAutoReviewMode,
+		newTaskAgentPreference,
 		newTaskBranchRef,
+		newTaskFallbackAgentPreference,
 		newTaskImages,
 		newTaskStartInPlanMode,
 		resolvedDefaultTaskBranchRef,
@@ -382,9 +432,13 @@ export function useTaskEditor({
 		setEditTaskStartInPlanMode(false);
 		setEditTaskAutoReviewEnabled(false);
 		setEditTaskAutoReviewMode("commit");
+		setEditTaskAgentPreference("inherit");
+		setEditTaskFallbackAgentPreference("inherit");
 		setEditTaskImages([]);
 		setEditTaskBranchRef("");
 		setNewTaskImages([]);
+		setNewTaskAgentPreference("inherit");
+		setNewTaskFallbackAgentPreference("inherit");
 	}, []);
 
 	return {
@@ -402,6 +456,10 @@ export function useTaskEditor({
 		isNewTaskStartInPlanModeDisabled,
 		newTaskBranchRef,
 		setNewTaskBranchRef,
+		newTaskAgentPreference,
+		setNewTaskAgentPreference,
+		newTaskFallbackAgentPreference,
+		setNewTaskFallbackAgentPreference,
 		editingTaskId,
 		editTaskPrompt,
 		setEditTaskPrompt,
@@ -416,6 +474,10 @@ export function useTaskEditor({
 		isEditTaskStartInPlanModeDisabled,
 		editTaskBranchRef,
 		setEditTaskBranchRef,
+		editTaskAgentPreference,
+		setEditTaskAgentPreference,
+		editTaskFallbackAgentPreference,
+		setEditTaskFallbackAgentPreference,
 		handleOpenCreateTask,
 		handleCancelCreateTask,
 		handleOpenEditTask,

@@ -20,6 +20,7 @@ function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): 
 		globalConfigPath: "/tmp/global-config.json",
 		projectConfigPath: "/tmp/project-config.json",
 		selectedAgentId: "claude",
+		fallbackAgentId: null,
 		selectedShortcutLabel: null,
 		agentAutonomousModeEnabled: true,
 		readyForReviewNotificationsEnabled: true,

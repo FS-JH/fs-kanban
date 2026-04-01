@@ -7,7 +7,7 @@ import { useLinkedBacklogTaskActions } from "@/hooks/use-linked-backlog-task-act
 import { useProgrammaticCardMoves } from "@/hooks/use-programmatic-card-moves";
 import { useReviewAutoActions } from "@/hooks/use-review-auto-actions";
 import type { UseTaskSessionsResult } from "@/hooks/use-task-sessions";
-import type { RuntimeTaskSessionSummary, RuntimeTaskWorkspaceInfoResponse } from "@/runtime/types";
+import type { RuntimeAgentId, RuntimeTaskSessionSummary, RuntimeTaskWorkspaceInfoResponse } from "@/runtime/types";
 import {
 	applyDragResult,
 	clearColumnTasks,
@@ -84,6 +84,7 @@ export interface UseBoardInteractionsResult {
 	handleMoveToTrash: () => void;
 	handleMoveReviewCardToTrash: (taskId: string) => void;
 	handleRestoreTaskFromTrash: (taskId: string) => void;
+	handleRetryTaskWithAgent: (taskId: string, agentId: RuntimeAgentId) => void;
 	handleCancelAutomaticTaskAction: (taskId: string) => void;
 	handleOpenClearTrash: () => void;
 	handleConfirmClearTrash: () => void;
@@ -287,7 +288,7 @@ export function useBoardInteractions({
 			task: BoardCard,
 			taskId: string,
 			fromColumnId: BoardColumnId,
-			options?: { optimisticMove?: boolean },
+			options?: { optimisticMove?: boolean; agentId?: RuntimeAgentId },
 		): Promise<boolean> => {
 			const optimisticMove = options?.optimisticMove ?? true;
 			const ensured = await ensureTaskWorkspace(task);
@@ -330,7 +331,9 @@ export function useBoardInteractions({
 					setTaskWorkspaceInfo(infoAfterEnsure);
 				}
 			}
-			const started = await startTaskSession(task);
+			const started = options?.agentId
+				? await startTaskSession(task, { agentId: options.agentId })
+				: await startTaskSession(task);
 			if (!started.ok) {
 				notifyError(started.message ?? "Could not start task session.");
 				if (optimisticMove) {
@@ -361,7 +364,7 @@ export function useBoardInteractions({
 	);
 
 	const startBacklogTaskImmediately = useCallback(
-		async (task: BoardCard): Promise<boolean> => {
+		async (task: BoardCard, options?: { agentId?: RuntimeAgentId }): Promise<boolean> => {
 			const selection = findCardSelection(board, task.id);
 			if (!selection || selection.column.id !== "backlog") {
 				return false;
@@ -378,6 +381,7 @@ export function useBoardInteractions({
 
 			return kickoffTaskInProgress(task, task.id, "backlog", {
 				optimisticMove: true,
+				agentId: options?.agentId,
 			});
 		},
 		[board, kickoffTaskInProgress, setBoard],
@@ -793,6 +797,43 @@ export function useBoardInteractions({
 		[board, resumeTaskFromTrash, setBoard, tryProgrammaticCardMove],
 	);
 
+	const handleRetryTaskWithAgent = useCallback(
+		(taskId: string, agentId: RuntimeAgentId) => {
+			const selection = findCardSelection(board, taskId);
+			if (!selection) {
+				return;
+			}
+			maybeRequestNotificationPermissionForTaskStart();
+			if (selection.column.id === "backlog") {
+				void startBacklogTaskImmediately(selection.card, { agentId });
+				return;
+			}
+			if (selection.column.id === "in_progress") {
+				void kickoffTaskInProgress(selection.card, taskId, "in_progress", {
+					optimisticMove: false,
+					agentId,
+				});
+				return;
+			}
+			if (selection.column.id === "review" || selection.column.id === "trash") {
+				const moved = moveTaskToColumn(board, taskId, "in_progress", { insertAtTop: true });
+				if (!moved.moved) {
+					return;
+				}
+				setBoard(moved.board);
+				const movedSelection = findCardSelection(moved.board, taskId);
+				if (!movedSelection) {
+					return;
+				}
+				void kickoffTaskInProgress(movedSelection.card, taskId, selection.column.id, {
+					optimisticMove: true,
+					agentId,
+				});
+			}
+		},
+		[board, kickoffTaskInProgress, maybeRequestNotificationPermissionForTaskStart, setBoard, startBacklogTaskImmediately],
+	);
+
 	const handleCancelAutomaticTaskAction = useCallback(
 		(taskId: string) => {
 			setBoard((currentBoard) => {
@@ -805,6 +846,8 @@ export function useBoardInteractions({
 					startInPlanMode: selection.card.startInPlanMode,
 					autoReviewEnabled: false,
 					autoReviewMode: resolveTaskAutoReviewMode(selection.card.autoReviewMode),
+					agentId: selection.card.agentId,
+					fallbackAgentId: selection.card.fallbackAgentId,
 					baseRef: selection.card.baseRef,
 				});
 				return updated.updated ? updated.board : currentBoard;
@@ -887,6 +930,7 @@ export function useBoardInteractions({
 		handleMoveToTrash,
 		handleMoveReviewCardToTrash,
 		handleRestoreTaskFromTrash,
+		handleRetryTaskWithAgent,
 		handleCancelAutomaticTaskAction,
 		handleOpenClearTrash,
 		handleConfirmClearTrash,

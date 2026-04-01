@@ -10,6 +10,8 @@ import { FileTreePanel } from "@/components/detail-panels/file-tree-panel";
 import { ResizableBottomPane } from "@/components/resizable-bottom-pane";
 import { Button } from "@/components/ui/button";
 import type {
+	RuntimeAgentId,
+	RuntimeConfigResponse,
 	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceChangesMode,
 } from "@/runtime/types";
@@ -17,6 +19,7 @@ import { useRuntimeWorkspaceChanges } from "@/runtime/use-runtime-workspace-chan
 import { useTaskWorkspaceStateVersionValue } from "@/stores/workspace-metadata-store";
 import { TERMINAL_THEME_COLORS } from "@/terminal/theme-colors";
 import { type BoardCard, type CardSelection, getTaskAutoReviewCancelButtonLabel } from "@/types";
+import { getTaskRetryAgentOptions } from "@/utils/task-agent-preferences";
 import { useUnmount, useWindowEvent } from "@/utils/react-use";
 
 // We still poll the open detail diff because line content can change without changing
@@ -177,6 +180,7 @@ function DiffToolbar({
 export function CardDetailView({
 	selection,
 	currentProjectId,
+	runtimeConfig,
 	workspacePath,
 	sessionSummary,
 	taskSessions,
@@ -196,6 +200,7 @@ export function CardDetailView({
 	onAgentOpenPrTask,
 	onMoveReviewCardToTrash,
 	onRestoreTaskFromTrash,
+	onRetryTaskWithAgent,
 	onCancelAutomaticTaskAction,
 	commitTaskLoadingById,
 	openPrTaskLoadingById,
@@ -224,6 +229,7 @@ export function CardDetailView({
 }: {
 	selection: CardSelection;
 	currentProjectId: string | null;
+	runtimeConfig?: RuntimeConfigResponse | null;
 	workspacePath?: string | null;
 	sessionSummary: RuntimeTaskSessionSummary | null;
 	taskSessions: Record<string, RuntimeTaskSessionSummary>;
@@ -243,6 +249,7 @@ export function CardDetailView({
 	onAgentOpenPrTask?: (taskId: string) => void;
 	onMoveReviewCardToTrash?: (taskId: string) => void;
 	onRestoreTaskFromTrash?: (taskId: string) => void;
+	onRetryTaskWithAgent?: (taskId: string, agentId: RuntimeAgentId) => void;
 	onCancelAutomaticTaskAction?: (taskId: string) => void;
 	commitTaskLoadingById?: Record<string, boolean>;
 	openPrTaskLoadingById?: Record<string, boolean>;
@@ -375,6 +382,10 @@ export function CardDetailView({
 	const fileTreePanelFlex = `0 0 ${isDiffExpanded ? EXPANDED_FILE_TREE_PANEL_BASIS : COLLAPSED_FILE_TREE_PANEL_BASIS}`;
 	const showMoveToTrashActions = selection.column.id === "review" || selection.column.id === "in_progress";
 	const isTaskTerminalEnabled = selection.column.id === "in_progress" || selection.column.id === "review";
+	const retryAgentOptions = useMemo(
+		() => getTaskRetryAgentOptions(selection.card, sessionSummary, runtimeConfig ?? null),
+		[runtimeConfig, selection.card, sessionSummary],
+	);
 	const availablePaths = useMemo(() => {
 		if (!runtimeFiles || runtimeFiles.length === 0) {
 			return [];
@@ -563,6 +574,12 @@ export function CardDetailView({
 									terminalBackgroundColor={TERMINAL_THEME_COLORS.surfacePrimary}
 									showRightBorder={false}
 									taskColumnId={selection.column.id}
+									retryAgentOptions={retryAgentOptions}
+									onRetryWithAgent={
+										onRetryTaskWithAgent
+											? (agentId) => onRetryTaskWithAgent(selection.card.id, agentId)
+											: undefined
+									}
 								/>
 							</div>
 							{!isDiffExpanded ? (

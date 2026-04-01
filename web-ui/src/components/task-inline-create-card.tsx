@@ -4,11 +4,17 @@ import { useCallback, useRef, useState, type Dispatch, type ReactElement, type S
 import { useHotkeys } from "react-hotkeys-hook";
 
 import { BranchSelectDropdown, type BranchSelectOption } from "@/components/branch-select-dropdown";
+import { TaskAgentPreferenceFields } from "@/components/task-agent-preference-fields";
 import { TaskPromptComposer } from "@/components/task-prompt-composer";
 import { Button } from "@/components/ui/button";
+import type { RuntimeConfigResponse } from "@/runtime/types";
 import type { TaskAutoReviewMode, TaskImage } from "@/types";
 import { pasteShortcutLabel } from "@/utils/platform";
 import { useDocumentEvent, useMeasure } from "@/utils/react-use";
+import type {
+	TaskAgentPreferenceValue,
+	TaskFallbackAgentPreferenceValue,
+} from "@/utils/task-agent-preferences";
 
 export type TaskInlineCardMode = "create" | "edit";
 
@@ -57,9 +63,14 @@ export function TaskInlineCreateCard({
 	onAutoReviewModeChange,
 	startInPlanModeDisabled = false,
 	workspaceId,
+	runtimeConfig,
 	branchRef,
 	branchOptions,
 	onBranchRefChange,
+	agentPreference,
+	onAgentPreferenceChange,
+	fallbackAgentPreference,
+	onFallbackAgentPreferenceChange,
 	enabled = true,
 	mode = "create",
 	idPrefix = "inline-task",
@@ -79,9 +90,14 @@ export function TaskInlineCreateCard({
 	onAutoReviewModeChange: (value: TaskAutoReviewMode) => void;
 	startInPlanModeDisabled?: boolean;
 	workspaceId: string | null;
+	runtimeConfig: RuntimeConfigResponse | null;
 	branchRef: string;
 	branchOptions: TaskBranchOption[];
 	onBranchRefChange: (value: string) => void;
+	agentPreference: TaskAgentPreferenceValue;
+	onAgentPreferenceChange: (value: TaskAgentPreferenceValue) => void;
+	fallbackAgentPreference: TaskFallbackAgentPreferenceValue;
+	onFallbackAgentPreferenceChange: (value: TaskFallbackAgentPreferenceValue) => void;
 	enabled?: boolean;
 	mode?: TaskInlineCardMode;
 	idPrefix?: string;
@@ -211,6 +227,15 @@ export function TaskInlineCreateCard({
 						emptyText="No branches detected"
 					/>
 				</div>
+
+				<TaskAgentPreferenceFields
+					runtimeConfig={runtimeConfig}
+					preferredValue={agentPreference}
+					onPreferredChange={onAgentPreferenceChange}
+					fallbackValue={fallbackAgentPreference}
+					onFallbackChange={onFallbackAgentPreferenceChange}
+					disabled={!enabled}
+				/>
 
 				<div className="flex items-center gap-2 flex-wrap">
 					<label

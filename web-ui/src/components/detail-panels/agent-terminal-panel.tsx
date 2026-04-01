@@ -7,10 +7,11 @@ import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
-import type { RuntimeTaskSessionSummary } from "@/runtime/types";
+import type { RuntimeAgentId, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import { usePersistentTerminalSession } from "@/terminal/use-persistent-terminal-session";
 import { isMacPlatform } from "@/utils/platform";
+import type { TaskRetryAgentOption } from "@/utils/task-agent-preferences";
 
 
 interface AgentTerminalSessionControls {
@@ -34,6 +35,8 @@ export interface AgentTerminalPanelProps {
 	taskColumnId?: string;
 	onMoveToTrash?: () => void;
 	isMoveToTrashLoading?: boolean;
+	retryAgentOptions?: TaskRetryAgentOption[];
+	onRetryWithAgent?: (agentId: RuntimeAgentId) => void;
 	onCancelAutomaticAction?: () => void;
 	cancelAutomaticActionLabel?: string | null;
 	showMoveToTrash?: boolean;
@@ -155,6 +158,8 @@ function AgentTerminalPanelLayout({
 	taskColumnId = "in_progress",
 	onMoveToTrash,
 	isMoveToTrashLoading = false,
+	retryAgentOptions = [],
+	onRetryWithAgent,
 	onCancelAutomaticAction,
 	cancelAutomaticActionLabel,
 	showMoveToTrash,
@@ -322,6 +327,20 @@ function AgentTerminalPanelLayout({
 			) : null}
 			{showMoveToTrash && onMoveToTrash ? (
 				<div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 12px" }}>
+					{retryAgentOptions.length > 0 && onRetryWithAgent ? (
+						<div className="flex flex-col gap-2">
+							{retryAgentOptions.map((option) => (
+								<Button
+									key={option.id}
+									variant={option.reason === "fallback" ? "primary" : "default"}
+									fill
+									onClick={() => onRetryWithAgent(option.id)}
+								>
+									{`Retry with ${option.label}`}
+								</Button>
+							))}
+						</div>
+					) : null}
 					<AgentTerminalReviewActions
 						taskId={taskId}
 						taskColumnId={taskColumnId}
@@ -347,6 +366,20 @@ function AgentTerminalPanelLayout({
 					>
 						{isMoveToTrashLoading ? <Spinner size={14} /> : "Move Card To Trash"}
 					</Button>
+				</div>
+			) : null}
+			{!showMoveToTrash && retryAgentOptions.length > 0 && onRetryWithAgent ? (
+				<div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 12px" }}>
+					{retryAgentOptions.map((option) => (
+						<Button
+							key={option.id}
+							variant={option.reason === "fallback" ? "primary" : "default"}
+							fill
+							onClick={() => onRetryWithAgent(option.id)}
+						>
+							{`Retry with ${option.label}`}
+						</Button>
+					))}
 				</div>
 			) : null}
 		</div>
