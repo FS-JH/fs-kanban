@@ -20,7 +20,6 @@ import {
 	buildKanbanRuntimeUrl,
 	DEFAULT_KANBAN_RUNTIME_PORT,
 	getKanbanRuntimeHost,
-	getKanbanRuntimeBindOrigin,
 	getKanbanRuntimeOrigin,
 	getKanbanRuntimePort,
 	parseRuntimePort,
