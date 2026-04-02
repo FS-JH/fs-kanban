@@ -4,6 +4,8 @@ import type {
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
 	RuntimeBoardDependency,
+	RuntimeExternalTaskSource,
+	RuntimeExternalTaskSourceInput,
 	RuntimeTaskAutoReviewMode,
 	RuntimeTaskImage,
 } from "./api-contract.js";
@@ -17,6 +19,7 @@ export interface RuntimeCreateTaskInput {
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId;
 	fallbackAgentId?: RuntimeAgentId | null;
+	externalSource?: RuntimeExternalTaskSource;
 	baseRef: string;
 }
 
@@ -28,7 +31,17 @@ export interface RuntimeUpdateTaskInput {
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId;
 	fallbackAgentId?: RuntimeAgentId | null;
+	externalSource?: RuntimeExternalTaskSource;
 	baseRef: string;
+}
+
+export interface RuntimeImportBacklogTaskInput {
+	prompt: string;
+	baseRef: string;
+	startInPlanMode?: boolean;
+	autoReviewEnabled?: boolean;
+	autoReviewMode?: RuntimeTaskAutoReviewMode;
+	externalSource: RuntimeExternalTaskSourceInput;
 }
 
 function normalizeTaskAutoReviewMode(value: RuntimeTaskAutoReviewMode | null | undefined): RuntimeTaskAutoReviewMode {
@@ -57,6 +70,60 @@ function normalizeTaskFallbackAgentId(
 	return agentId === preferredAgentId ? null : agentId;
 }
 
+function cloneExternalTaskSource(source?: RuntimeExternalTaskSource): RuntimeExternalTaskSource | undefined {
+	return source
+		? {
+				...source,
+		  }
+		: undefined;
+}
+
+function normalizeExternalTaskSource(
+	source: RuntimeExternalTaskSourceInput,
+	importedAt: number,
+): RuntimeExternalTaskSource {
+	return {
+		provider: source.provider,
+		externalId: source.externalId.trim(),
+		externalUrl: source.externalUrl.trim(),
+		repoKey: source.repoKey.trim(),
+		itemType: source.itemType,
+		sourceUpdatedAt: source.sourceUpdatedAt.trim(),
+		importedAt,
+	};
+}
+
+function externalTaskSourceMatches(
+	cardSource: RuntimeExternalTaskSource | undefined,
+	expected: RuntimeExternalTaskSourceInput,
+): boolean {
+	return (
+		cardSource?.provider === expected.provider &&
+		cardSource.externalId === expected.externalId.trim()
+	);
+}
+
+function externalTaskSourceEquals(
+	left: RuntimeExternalTaskSource | undefined,
+	right: RuntimeExternalTaskSource | undefined,
+): boolean {
+	if (!left && !right) {
+		return true;
+	}
+	if (!left || !right) {
+		return false;
+	}
+	return (
+		left.provider === right.provider &&
+		left.externalId === right.externalId &&
+		left.externalUrl === right.externalUrl &&
+		left.repoKey === right.repoKey &&
+		left.itemType === right.itemType &&
+		left.sourceUpdatedAt === right.sourceUpdatedAt &&
+		left.importedAt === right.importedAt
+	);
+}
+
 export interface RuntimeCreateTaskResult {
 	board: RuntimeBoardData;
 	task: RuntimeBoardCard;
@@ -73,6 +140,14 @@ export interface RuntimeUpdateTaskResult {
 	board: RuntimeBoardData;
 	task: RuntimeBoardCard | null;
 	updated: boolean;
+}
+
+export interface RuntimeImportedBacklogTaskResult {
+	board: RuntimeBoardData;
+	task: RuntimeBoardCard;
+	status: "created" | "updated" | "unchanged" | "skipped";
+	columnId: RuntimeBoardColumnId;
+	reason?: "not_backlog";
 }
 
 export interface RuntimeAddTaskDependencyResult {
@@ -95,6 +170,27 @@ export interface RuntimeDeleteTasksResult {
 	board: RuntimeBoardData;
 	deleted: boolean;
 	deletedTaskIds: string[];
+}
+
+export function findTaskByExternalSource(
+	board: RuntimeBoardData,
+	externalSource: RuntimeExternalTaskSourceInput,
+):
+	| {
+			columnId: RuntimeBoardColumnId;
+			task: RuntimeBoardCard;
+	  }
+	| null {
+	for (const column of board.columns) {
+		const task = column.cards.find((card) => externalTaskSourceMatches(card.externalSource, externalSource));
+		if (task) {
+			return {
+				columnId: column.id,
+				task,
+			};
+		}
+	}
+	return null;
 }
 
 function collectExistingTaskIds(board: RuntimeBoardData): Set<string> {
@@ -301,6 +397,7 @@ export function addTaskToColumn(
 		images: cloneTaskImages(input.images),
 		agentId,
 		fallbackAgentId: normalizeTaskFallbackAgentId(input.fallbackAgentId, agentId),
+		externalSource: cloneExternalTaskSource(input.externalSource),
 		baseRef,
 		createdAt: now,
 		updatedAt: now,
@@ -620,6 +717,8 @@ export function updateTask(
 					input.fallbackAgentId === undefined
 						? card.fallbackAgentId
 						: normalizeTaskFallbackAgentId(input.fallbackAgentId, preferredAgentId),
+				externalSource:
+					input.externalSource === undefined ? card.externalSource : cloneExternalTaskSource(input.externalSource),
 				baseRef,
 				updatedAt: now,
 			};
@@ -643,5 +742,92 @@ export function updateTask(
 		},
 		task: updatedTask,
 		updated: true,
+	};
+}
+
+export function upsertBacklogTaskByExternalSource(
+	board: RuntimeBoardData,
+	input: RuntimeImportBacklogTaskInput,
+	randomUuid: () => string,
+	now: number = Date.now(),
+): RuntimeImportedBacklogTaskResult {
+	const existing = findTaskByExternalSource(board, input.externalSource);
+	if (!existing) {
+		const created = addTaskToColumn(
+			board,
+			"backlog",
+			{
+				prompt: input.prompt,
+				startInPlanMode: input.startInPlanMode,
+				autoReviewEnabled: input.autoReviewEnabled,
+				autoReviewMode: input.autoReviewMode,
+				externalSource: normalizeExternalTaskSource(input.externalSource, now),
+				baseRef: input.baseRef,
+			},
+			randomUuid,
+			now,
+		);
+		return {
+			board: created.board,
+			task: created.task,
+			status: "created",
+			columnId: "backlog",
+		};
+	}
+
+	const nextExternalSource = normalizeExternalTaskSource(
+		input.externalSource,
+		existing.task.externalSource?.importedAt ?? now,
+	);
+	if (existing.columnId !== "backlog") {
+		return {
+			board,
+			task: existing.task,
+			status: "skipped",
+			columnId: existing.columnId,
+			reason: "not_backlog",
+		};
+	}
+	const nextStartInPlanMode = input.startInPlanMode ?? existing.task.startInPlanMode;
+	const nextAutoReviewEnabled = input.autoReviewEnabled ?? existing.task.autoReviewEnabled;
+	const nextAutoReviewMode = input.autoReviewMode ?? existing.task.autoReviewMode;
+	const nextBaseRef = input.baseRef.trim();
+	const noChanges =
+		existing.task.prompt === input.prompt.trim() &&
+		existing.task.baseRef === nextBaseRef &&
+		existing.task.startInPlanMode === Boolean(nextStartInPlanMode) &&
+		Boolean(existing.task.autoReviewEnabled) === Boolean(nextAutoReviewEnabled) &&
+		normalizeTaskAutoReviewMode(existing.task.autoReviewMode) === normalizeTaskAutoReviewMode(nextAutoReviewMode) &&
+		externalTaskSourceEquals(existing.task.externalSource, nextExternalSource);
+	if (noChanges) {
+		return {
+			board,
+			task: existing.task,
+			status: "unchanged",
+			columnId: existing.columnId,
+		};
+	}
+
+	const updated = updateTask(
+		board,
+		existing.task.id,
+		{
+			prompt: input.prompt,
+			baseRef: nextBaseRef,
+			startInPlanMode: nextStartInPlanMode,
+			autoReviewEnabled: nextAutoReviewEnabled,
+			autoReviewMode: nextAutoReviewMode,
+			images: existing.task.images,
+			agentId: existing.task.agentId,
+			fallbackAgentId: existing.task.fallbackAgentId,
+			externalSource: nextExternalSource,
+		},
+		now,
+	);
+	return {
+		board: updated.board,
+		task: updated.task ?? existing.task,
+		status: "updated",
+		columnId: existing.columnId,
 	};
 }

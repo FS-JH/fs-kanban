@@ -1,11 +1,14 @@
 import { TRPCError } from "@trpc/server";
 
 import type {
+	RuntimeBoardData,
 	RuntimeGitCheckoutResponse,
 	RuntimeGitDiscardResponse,
 	RuntimeGitSummaryResponse,
 	RuntimeGitSyncAction,
 	RuntimeGitSyncResponse,
+	RuntimeWorkspaceImportBacklogTaskResult,
+	RuntimeWorkspaceImportBacklogTasksResponse,
 	RuntimeWorkspaceChangesMode,
 	RuntimeWorkspaceFileSearchResponse,
 	RuntimeWorkspaceStateResponse,
@@ -15,6 +18,7 @@ import {
 	parseWorktreeDeleteRequest,
 	parseWorktreeEnsureRequest,
 } from "../core/api-validation.js";
+import { upsertBacklogTaskByExternalSource } from "../core/task-board-mutations.js";
 import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
 import {
@@ -153,6 +157,52 @@ function createEmptyGitDiscardErrorResponse(error: unknown): RuntimeGitDiscardRe
 		},
 		output: "",
 		error: message,
+	};
+}
+
+function resolveDefaultBaseRef(workspaceState: RuntimeWorkspaceStateResponse): string {
+	return workspaceState.git.currentBranch ?? workspaceState.git.defaultBranch ?? workspaceState.git.branches[0] ?? "main";
+}
+
+function mergeLiveTaskSessions(
+	sessions: RuntimeWorkspaceStateResponse["sessions"],
+	terminalManager: TerminalSessionManager,
+): RuntimeWorkspaceStateResponse["sessions"] {
+	const nextSessions = {
+		...sessions,
+	};
+	for (const summary of terminalManager.listSummaries()) {
+		nextSessions[summary.taskId] = summary;
+	}
+	return nextSessions;
+}
+
+function summarizeImportResults(results: RuntimeWorkspaceImportBacklogTaskResult[]): RuntimeWorkspaceImportBacklogTasksResponse {
+	let created = 0;
+	let updated = 0;
+	let unchanged = 0;
+	let skipped = 0;
+	for (const result of results) {
+		if (result.status === "created") {
+			created += 1;
+			continue;
+		}
+		if (result.status === "updated") {
+			updated += 1;
+			continue;
+		}
+		if (result.status === "skipped") {
+			skipped += 1;
+			continue;
+		}
+		unchanged += 1;
+	}
+	return {
+		created,
+		updated,
+		unchanged,
+		skipped,
+		results,
 	};
 }
 
@@ -314,13 +364,71 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 					workspaceScope.workspaceId,
 					workspaceScope.workspacePath,
 				);
-				for (const summary of terminalManager.listSummaries()) {
-					input.sessions[summary.taskId] = summary;
-				}
+				input.sessions = mergeLiveTaskSessions(input.sessions, terminalManager);
 				const response = await saveWorkspaceState(workspaceScope.workspacePath, input);
 				void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceScope.workspaceId, workspaceScope.workspacePath);
 				void deps.broadcastRuntimeProjectsUpdated(workspaceScope.workspaceId);
 				return response;
+			} catch (error) {
+				if (error instanceof WorkspaceStateConflictError) {
+					throw new TRPCError({
+						code: "CONFLICT",
+						message: error.message,
+						cause: {
+							currentRevision: error.currentRevision,
+						},
+					});
+				}
+				throw error;
+			}
+		},
+		importBacklogTasks: async (workspaceScope, input) => {
+			try {
+				const workspaceState = await deps.buildWorkspaceStateSnapshot(
+					workspaceScope.workspaceId,
+					workspaceScope.workspacePath,
+				);
+				const defaultBaseRef = resolveDefaultBaseRef(workspaceState);
+				let nextBoard: RuntimeBoardData = workspaceState.board;
+				const results: RuntimeWorkspaceImportBacklogTaskResult[] = [];
+				for (const item of input.items) {
+					const imported = upsertBacklogTaskByExternalSource(
+						nextBoard,
+						{
+							prompt: item.prompt,
+							baseRef: item.baseRef?.trim() || defaultBaseRef,
+							startInPlanMode: item.startInPlanMode,
+							autoReviewEnabled: item.autoReviewEnabled,
+							autoReviewMode: item.autoReviewMode,
+							externalSource: item.externalSource,
+						},
+						() => crypto.randomUUID(),
+					);
+					nextBoard = imported.board;
+					results.push({
+						taskId: imported.task.id,
+						externalId: item.externalSource.externalId,
+						status: imported.status,
+						columnId: imported.columnId,
+						reason: imported.reason,
+					});
+				}
+				const summary = summarizeImportResults(results);
+				if (summary.created === 0 && summary.updated === 0) {
+					return summary;
+				}
+				const terminalManager = await deps.ensureTerminalManagerForWorkspace(
+					workspaceScope.workspaceId,
+					workspaceScope.workspacePath,
+				);
+				await saveWorkspaceState(workspaceScope.workspacePath, {
+					board: nextBoard,
+					sessions: mergeLiveTaskSessions(workspaceState.sessions, terminalManager),
+					expectedRevision: workspaceState.revision,
+				});
+				void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceScope.workspaceId, workspaceScope.workspacePath);
+				void deps.broadcastRuntimeProjectsUpdated(workspaceScope.workspaceId);
+				return summary;
 			} catch (error) {
 				if (error instanceof WorkspaceStateConflictError) {
 					throw new TRPCError({
