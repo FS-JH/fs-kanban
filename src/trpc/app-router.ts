@@ -49,6 +49,8 @@ import type {
 	RuntimeWorkspaceFileSearchResponse,
 	RuntimeWorkspaceImportBacklogTasksRequest,
 	RuntimeWorkspaceImportBacklogTasksResponse,
+	RuntimeWorkspaceImportedTaskLookupRequest,
+	RuntimeWorkspaceImportedTaskLookupResponse,
 	RuntimeWorkspaceStateResponse,
 	RuntimeWorkspaceStateNotifyResponse,
 	RuntimeWorkspaceStateSaveRequest,
@@ -101,6 +103,8 @@ import {
 	runtimeWorkspaceFileSearchResponseSchema,
 	runtimeWorkspaceImportBacklogTasksRequestSchema,
 	runtimeWorkspaceImportBacklogTasksResponseSchema,
+	runtimeWorkspaceImportedTaskLookupRequestSchema,
+	runtimeWorkspaceImportedTaskLookupResponseSchema,
 	runtimeWorkspaceStateResponseSchema,
 	runtimeWorkspaceStateNotifyResponseSchema,
 	runtimeWorkspaceStateSaveRequestSchema,
@@ -197,6 +201,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeWorkspaceImportBacklogTasksRequest,
 		) => Promise<RuntimeWorkspaceImportBacklogTasksResponse>;
+		getImportedTaskByExternalSource: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeWorkspaceImportedTaskLookupRequest,
+		) => Promise<RuntimeWorkspaceImportedTaskLookupResponse>;
 		loadWorkspaceChanges: (scope: RuntimeTrpcWorkspaceScope) => Promise<RuntimeWorkspaceChangesResponse>;
 		loadGitLog: (scope: RuntimeTrpcWorkspaceScope, input: RuntimeGitLogRequest) => Promise<RuntimeGitLogResponse>;
 		loadGitRefs: (
@@ -409,6 +417,12 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeWorkspaceImportBacklogTasksResponseSchema)
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.workspaceApi.importBacklogTasks(ctx.workspaceScope, input);
+			}),
+		getImportedTaskByExternalSource: workspaceProcedure
+			.input(runtimeWorkspaceImportedTaskLookupRequestSchema)
+			.output(runtimeWorkspaceImportedTaskLookupResponseSchema)
+			.query(async ({ ctx, input }) => {
+				return await ctx.workspaceApi.getImportedTaskByExternalSource(ctx.workspaceScope, input);
 			}),
 		getWorkspaceChanges: workspaceProcedure.output(runtimeWorkspaceChangesResponseSchema).query(async ({ ctx }) => {
 			return await ctx.workspaceApi.loadWorkspaceChanges(ctx.workspaceScope);

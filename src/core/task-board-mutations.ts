@@ -717,11 +717,13 @@ export function updateTask(
 					input.fallbackAgentId === undefined
 						? card.fallbackAgentId
 						: normalizeTaskFallbackAgentId(input.fallbackAgentId, preferredAgentId),
-				externalSource:
-					input.externalSource === undefined ? card.externalSource : cloneExternalTaskSource(input.externalSource),
 				baseRef,
 				updatedAt: now,
 			};
+			if (card.externalSource !== undefined) {
+				updatedTask.externalSource =
+					input.externalSource === undefined ? card.externalSource : cloneExternalTaskSource(input.externalSource);
+			}
 			return updatedTask;
 		});
 		return columnUpdated ? { ...column, cards } : column;

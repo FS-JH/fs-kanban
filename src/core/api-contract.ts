@@ -310,6 +310,23 @@ export type RuntimeWorkspaceImportBacklogTasksResponse = z.infer<
 	typeof runtimeWorkspaceImportBacklogTasksResponseSchema
 >;
 
+export const runtimeWorkspaceImportedTaskLookupRequestSchema = z.object({
+	externalSource: runtimeExternalTaskSourceInputSchema,
+});
+export type RuntimeWorkspaceImportedTaskLookupRequest = z.infer<
+	typeof runtimeWorkspaceImportedTaskLookupRequestSchema
+>;
+
+export const runtimeWorkspaceImportedTaskLookupResponseSchema = z.object({
+	found: z.boolean(),
+	taskId: z.string().nullable(),
+	columnId: runtimeBoardColumnIdSchema.nullable(),
+	task: runtimeBoardCardSchema.nullable(),
+});
+export type RuntimeWorkspaceImportedTaskLookupResponse = z.infer<
+	typeof runtimeWorkspaceImportedTaskLookupResponseSchema
+>;
+
 export const runtimeWorkspaceStateConflictResponseSchema = z.object({
 	error: z.string(),
 	currentRevision: z.number(),

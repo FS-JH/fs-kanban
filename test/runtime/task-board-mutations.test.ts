@@ -105,6 +105,35 @@ describe("task images", () => {
 			},
 		]);
 	});
+
+	it("does not attach external source metadata to a task that did not already have it", () => {
+		const created = addTaskToColumn(
+			createBoard(),
+			"backlog",
+			{
+				prompt: "Plain task",
+				baseRef: "main",
+			},
+			() => "aaaaa111",
+			100,
+		);
+
+		const updated = updateTask(created.board, created.task.id, {
+			prompt: "Plain task updated",
+			baseRef: "main",
+			externalSource: {
+				provider: "notion",
+				externalId: "page-plain",
+				externalUrl: "https://notion.so/page-plain",
+				repoKey: "fs-kanban",
+				itemType: "bug",
+				sourceUpdatedAt: "2026-04-02T00:00:00.000Z",
+				importedAt: 100,
+			},
+		});
+
+		expect(updated.task?.externalSource).toBeUndefined();
+	});
 });
 
 describe("external backlog imports", () => {

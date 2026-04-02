@@ -9,6 +9,7 @@ import type {
 	RuntimeGitSyncResponse,
 	RuntimeWorkspaceImportBacklogTaskResult,
 	RuntimeWorkspaceImportBacklogTasksResponse,
+	RuntimeWorkspaceImportedTaskLookupResponse,
 	RuntimeWorkspaceChangesMode,
 	RuntimeWorkspaceFileSearchResponse,
 	RuntimeWorkspaceStateResponse,
@@ -18,7 +19,7 @@ import {
 	parseWorktreeDeleteRequest,
 	parseWorktreeEnsureRequest,
 } from "../core/api-validation.js";
-import { upsertBacklogTaskByExternalSource } from "../core/task-board-mutations.js";
+import { findTaskByExternalSource, upsertBacklogTaskByExternalSource } from "../core/task-board-mutations.js";
 import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
 import {
@@ -441,6 +442,27 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 				}
 				throw error;
 			}
+		},
+		getImportedTaskByExternalSource: async (workspaceScope, input) => {
+			const workspaceState = await deps.buildWorkspaceStateSnapshot(
+				workspaceScope.workspaceId,
+				workspaceScope.workspacePath,
+			);
+			const found = findTaskByExternalSource(workspaceState.board, input.externalSource);
+			if (!found) {
+				return {
+					found: false,
+					taskId: null,
+					columnId: null,
+					task: null,
+				} satisfies RuntimeWorkspaceImportedTaskLookupResponse;
+			}
+			return {
+				found: true,
+				taskId: found.task.id,
+				columnId: found.columnId,
+				task: found.task,
+			} satisfies RuntimeWorkspaceImportedTaskLookupResponse;
 		},
 		loadWorkspaceChanges: async (workspaceScope) => {
 			return await getWorkspaceChanges(workspaceScope.workspacePath);
