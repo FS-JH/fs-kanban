@@ -47,6 +47,8 @@ import type {
 	RuntimeWorkspaceChangesResponse,
 	RuntimeWorkspaceFileSearchRequest,
 	RuntimeWorkspaceFileSearchResponse,
+	RuntimeWorkspaceImportBacklogTasksRequest,
+	RuntimeWorkspaceImportBacklogTasksResponse,
 	RuntimeWorkspaceStateResponse,
 	RuntimeWorkspaceStateNotifyResponse,
 	RuntimeWorkspaceStateSaveRequest,
@@ -97,6 +99,8 @@ import {
 	runtimeWorkspaceChangesResponseSchema,
 	runtimeWorkspaceFileSearchRequestSchema,
 	runtimeWorkspaceFileSearchResponseSchema,
+	runtimeWorkspaceImportBacklogTasksRequestSchema,
+	runtimeWorkspaceImportBacklogTasksResponseSchema,
 	runtimeWorkspaceStateResponseSchema,
 	runtimeWorkspaceStateNotifyResponseSchema,
 	runtimeWorkspaceStateSaveRequestSchema,
@@ -189,6 +193,10 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeWorkspaceStateSaveRequest,
 		) => Promise<RuntimeWorkspaceStateResponse>;
+		importBacklogTasks: (
+			scope: RuntimeTrpcWorkspaceScope,
+			input: RuntimeWorkspaceImportBacklogTasksRequest,
+		) => Promise<RuntimeWorkspaceImportBacklogTasksResponse>;
 		loadWorkspaceChanges: (scope: RuntimeTrpcWorkspaceScope) => Promise<RuntimeWorkspaceChangesResponse>;
 		loadGitLog: (scope: RuntimeTrpcWorkspaceScope, input: RuntimeGitLogRequest) => Promise<RuntimeGitLogResponse>;
 		loadGitRefs: (
@@ -395,6 +403,12 @@ export const runtimeAppRouter = t.router({
 			.output(runtimeWorkspaceStateResponseSchema)
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.workspaceApi.saveState(ctx.workspaceScope, input);
+			}),
+		importBacklogTasks: workspaceProcedure
+			.input(runtimeWorkspaceImportBacklogTasksRequestSchema)
+			.output(runtimeWorkspaceImportBacklogTasksResponseSchema)
+			.mutation(async ({ ctx, input }) => {
+				return await ctx.workspaceApi.importBacklogTasks(ctx.workspaceScope, input);
 			}),
 		getWorkspaceChanges: workspaceProcedure.output(runtimeWorkspaceChangesResponseSchema).query(async ({ ctx }) => {
 			return await ctx.workspaceApi.loadWorkspaceChanges(ctx.workspaceScope);

@@ -90,6 +90,28 @@ export const runtimeTaskImageSchema = z.object({
 });
 export type RuntimeTaskImage = z.infer<typeof runtimeTaskImageSchema>;
 
+export const runtimeExternalTaskSourceProviderSchema = z.enum(["notion"]);
+export type RuntimeExternalTaskSourceProvider = z.infer<typeof runtimeExternalTaskSourceProviderSchema>;
+
+export const runtimeExternalTaskTypeSchema = z.enum(["bug", "enhancement", "feature_request"]);
+export type RuntimeExternalTaskType = z.infer<typeof runtimeExternalTaskTypeSchema>;
+
+export const runtimeExternalTaskSourceSchema = z.object({
+	provider: runtimeExternalTaskSourceProviderSchema,
+	externalId: z.string().min(1),
+	externalUrl: z.string().min(1),
+	repoKey: z.string().min(1),
+	itemType: runtimeExternalTaskTypeSchema,
+	sourceUpdatedAt: z.string().min(1),
+	importedAt: z.number(),
+});
+export type RuntimeExternalTaskSource = z.infer<typeof runtimeExternalTaskSourceSchema>;
+
+export const runtimeExternalTaskSourceInputSchema = runtimeExternalTaskSourceSchema.omit({
+	importedAt: true,
+});
+export type RuntimeExternalTaskSourceInput = z.infer<typeof runtimeExternalTaskSourceInputSchema>;
+
 export const runtimeBoardCardSchema = z.object({
 	id: z.string(),
 	prompt: z.string(),
@@ -99,6 +121,7 @@ export const runtimeBoardCardSchema = z.object({
 	images: z.array(runtimeTaskImageSchema).optional(),
 	agentId: runtimeAgentIdSchema.optional(),
 	fallbackAgentId: runtimeAgentIdSchema.nullable().optional(),
+	externalSource: runtimeExternalTaskSourceSchema.optional(),
 	baseRef: z.string(),
 	createdAt: z.number(),
 	updatedAt: z.number(),
@@ -251,6 +274,41 @@ export const runtimeWorkspaceStateSaveRequestSchema = z.object({
 	expectedRevision: z.number().int().nonnegative().optional(),
 });
 export type RuntimeWorkspaceStateSaveRequest = z.infer<typeof runtimeWorkspaceStateSaveRequestSchema>;
+
+export const runtimeWorkspaceImportBacklogTaskItemSchema = z.object({
+	prompt: z.string().min(1),
+	baseRef: z.string().optional(),
+	startInPlanMode: z.boolean().optional(),
+	autoReviewEnabled: z.boolean().optional(),
+	autoReviewMode: runtimeTaskAutoReviewModeSchema.optional(),
+	externalSource: runtimeExternalTaskSourceInputSchema,
+});
+export type RuntimeWorkspaceImportBacklogTaskItem = z.infer<typeof runtimeWorkspaceImportBacklogTaskItemSchema>;
+
+export const runtimeWorkspaceImportBacklogTasksRequestSchema = z.object({
+	items: z.array(runtimeWorkspaceImportBacklogTaskItemSchema).min(1),
+});
+export type RuntimeWorkspaceImportBacklogTasksRequest = z.infer<typeof runtimeWorkspaceImportBacklogTasksRequestSchema>;
+
+export const runtimeWorkspaceImportBacklogTaskResultSchema = z.object({
+	taskId: z.string(),
+	externalId: z.string(),
+	status: z.enum(["created", "updated", "unchanged", "skipped"]),
+	columnId: runtimeBoardColumnIdSchema,
+	reason: z.enum(["not_backlog"]).optional(),
+});
+export type RuntimeWorkspaceImportBacklogTaskResult = z.infer<typeof runtimeWorkspaceImportBacklogTaskResultSchema>;
+
+export const runtimeWorkspaceImportBacklogTasksResponseSchema = z.object({
+	created: z.number().int().nonnegative(),
+	updated: z.number().int().nonnegative(),
+	unchanged: z.number().int().nonnegative(),
+	skipped: z.number().int().nonnegative(),
+	results: z.array(runtimeWorkspaceImportBacklogTaskResultSchema),
+});
+export type RuntimeWorkspaceImportBacklogTasksResponse = z.infer<
+	typeof runtimeWorkspaceImportBacklogTasksResponseSchema
+>;
 
 export const runtimeWorkspaceStateConflictResponseSchema = z.object({
 	error: z.string(),
