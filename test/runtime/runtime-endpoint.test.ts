@@ -5,9 +5,12 @@ import {
 	buildKanbanRuntimeUrl,
 	buildKanbanRuntimeWsUrl,
 	DEFAULT_KANBAN_RUNTIME_PORT,
+	DEFAULT_KANBAN_RUNTIME_HTTPS_PORT,
 	getKanbanRuntimeAdvertisedHost,
 	getKanbanRuntimeHost,
+	getKanbanRuntimeHttpsPort,
 	getKanbanRuntimePort,
+	isKanbanRuntimeHttpsEnabled,
 	parseRuntimePort,
 	setKanbanRuntimeAdvertisedHost,
 	setKanbanRuntimeHost,
@@ -20,6 +23,12 @@ const originalRuntimeAdvertisedHost = getKanbanRuntimeAdvertisedHost();
 const originalEnvPort = process.env.KANBAN_RUNTIME_PORT;
 const originalEnvHost = process.env.KANBAN_RUNTIME_HOST;
 const originalEnvAdvertisedHost = process.env.KANBAN_RUNTIME_ADVERTISED_HOST;
+const originalEnvHttpsPort = process.env.KANBAN_RUNTIME_HTTPS_PORT;
+const originalEnvHttpsPortFallback = process.env.HTTPS_PORT;
+const originalEnvTlsCert = process.env.KANBAN_RUNTIME_TLS_CERT;
+const originalEnvTlsKey = process.env.KANBAN_RUNTIME_TLS_KEY;
+const originalEnvTlsCertFallback = process.env.TLS_CERT;
+const originalEnvTlsKeyFallback = process.env.TLS_KEY;
 
 afterEach(() => {
 	setKanbanRuntimePort(originalRuntimePort);
@@ -39,6 +48,36 @@ afterEach(() => {
 		delete process.env.KANBAN_RUNTIME_ADVERTISED_HOST;
 	} else {
 		process.env.KANBAN_RUNTIME_ADVERTISED_HOST = originalEnvAdvertisedHost;
+	}
+	if (originalEnvHttpsPort === undefined) {
+		delete process.env.KANBAN_RUNTIME_HTTPS_PORT;
+	} else {
+		process.env.KANBAN_RUNTIME_HTTPS_PORT = originalEnvHttpsPort;
+	}
+	if (originalEnvHttpsPortFallback === undefined) {
+		delete process.env.HTTPS_PORT;
+	} else {
+		process.env.HTTPS_PORT = originalEnvHttpsPortFallback;
+	}
+	if (originalEnvTlsCert === undefined) {
+		delete process.env.KANBAN_RUNTIME_TLS_CERT;
+	} else {
+		process.env.KANBAN_RUNTIME_TLS_CERT = originalEnvTlsCert;
+	}
+	if (originalEnvTlsKey === undefined) {
+		delete process.env.KANBAN_RUNTIME_TLS_KEY;
+	} else {
+		process.env.KANBAN_RUNTIME_TLS_KEY = originalEnvTlsKey;
+	}
+	if (originalEnvTlsCertFallback === undefined) {
+		delete process.env.TLS_CERT;
+	} else {
+		process.env.TLS_CERT = originalEnvTlsCertFallback;
+	}
+	if (originalEnvTlsKeyFallback === undefined) {
+		delete process.env.TLS_KEY;
+	} else {
+		process.env.TLS_KEY = originalEnvTlsKeyFallback;
 	}
 });
 
@@ -84,6 +123,21 @@ describe("runtime-endpoint", () => {
 		expect(buildKanbanRuntimeWsUrl("api/runtime/ws")).toBe("ws://foundation-ea.tailnet.ts.net:4567/api/runtime/ws");
 	});
 
+	it("switches advertised URLs to HTTPS when TLS env is configured", () => {
+		setKanbanRuntimeHost("0.0.0.0");
+		setKanbanRuntimeAdvertisedHost("foundation-ea.tailnet.ts.net");
+		setKanbanRuntimePort(4567);
+		process.env.KANBAN_RUNTIME_TLS_CERT = "/tmp/kanban.crt";
+		process.env.KANBAN_RUNTIME_TLS_KEY = "/tmp/kanban.key";
+		process.env.KANBAN_RUNTIME_HTTPS_PORT = "4443";
+
+		expect(isKanbanRuntimeHttpsEnabled()).toBe(true);
+		expect(getKanbanRuntimeHttpsPort()).toBe(4443);
+		expect(buildKanbanRuntimeBindUrl("/api/trpc")).toBe("http://0.0.0.0:4567/api/trpc");
+		expect(buildKanbanRuntimeUrl("/api/trpc")).toBe("https://foundation-ea.tailnet.ts.net:4443/api/trpc");
+		expect(buildKanbanRuntimeWsUrl("api/runtime/ws")).toBe("wss://foundation-ea.tailnet.ts.net:4443/api/runtime/ws");
+	});
+
 	it("falls back to the bind host when the advertised host is cleared", () => {
 		setKanbanRuntimeHost("100.64.0.1");
 		setKanbanRuntimeAdvertisedHost("foundation-ea.tailnet.ts.net");
@@ -96,5 +150,13 @@ describe("runtime-endpoint", () => {
 	it("defaults host to 127.0.0.1", () => {
 		expect(getKanbanRuntimeHost()).toBe("127.0.0.1");
 		expect(getKanbanRuntimeAdvertisedHost()).toBe("127.0.0.1");
+	});
+
+	it("defaults the HTTPS port when TLS is enabled without an explicit port", () => {
+		process.env.KANBAN_RUNTIME_TLS_CERT = "/tmp/kanban.crt";
+		process.env.KANBAN_RUNTIME_TLS_KEY = "/tmp/kanban.key";
+
+		expect(isKanbanRuntimeHttpsEnabled()).toBe(true);
+		expect(getKanbanRuntimeHttpsPort()).toBe(DEFAULT_KANBAN_RUNTIME_HTTPS_PORT);
 	});
 });

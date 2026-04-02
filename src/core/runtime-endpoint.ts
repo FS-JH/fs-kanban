@@ -1,5 +1,6 @@
 export const DEFAULT_KANBAN_RUNTIME_HOST = "127.0.0.1";
 export const DEFAULT_KANBAN_RUNTIME_PORT = 3484;
+export const DEFAULT_KANBAN_RUNTIME_HTTPS_PORT = 3443;
 
 function normalizeRuntimeHost(rawHost: string | null | undefined, fallback: string): string {
 	const normalized = rawHost?.trim();
@@ -37,6 +38,30 @@ export function setKanbanRuntimeAdvertisedHost(host: string | null | undefined):
 	delete process.env.KANBAN_RUNTIME_ADVERTISED_HOST;
 }
 
+function normalizeOptionalRuntimePath(rawPath: string | undefined): string | null {
+	const normalizedPath = rawPath?.trim();
+	return normalizedPath ? normalizedPath : null;
+}
+
+export function getKanbanRuntimeTlsCertPath(): string | null {
+	return normalizeOptionalRuntimePath(process.env.KANBAN_RUNTIME_TLS_CERT) ?? normalizeOptionalRuntimePath(process.env.TLS_CERT);
+}
+
+export function getKanbanRuntimeTlsKeyPath(): string | null {
+	return normalizeOptionalRuntimePath(process.env.KANBAN_RUNTIME_TLS_KEY) ?? normalizeOptionalRuntimePath(process.env.TLS_KEY);
+}
+
+export function isKanbanRuntimeHttpsEnabled(): boolean {
+	return getKanbanRuntimeTlsCertPath() !== null && getKanbanRuntimeTlsKeyPath() !== null;
+}
+
+export function getKanbanRuntimeHttpsPort(): number {
+	const rawPort =
+		normalizeOptionalRuntimePath(process.env.KANBAN_RUNTIME_HTTPS_PORT) ??
+		normalizeOptionalRuntimePath(process.env.HTTPS_PORT);
+	return rawPort ? parseRuntimePort(rawPort) : DEFAULT_KANBAN_RUNTIME_HTTPS_PORT;
+}
+
 export function parseRuntimePort(rawPort: string | undefined): number {
 	if (!rawPort) {
 		return DEFAULT_KANBAN_RUNTIME_PORT;
@@ -65,10 +90,16 @@ export function getKanbanRuntimeBindOrigin(): string {
 }
 
 export function getKanbanRuntimeOrigin(): string {
+	if (isKanbanRuntimeHttpsEnabled()) {
+		return `https://${getKanbanRuntimeAdvertisedHost()}:${getKanbanRuntimeHttpsPort()}`;
+	}
 	return `http://${getKanbanRuntimeAdvertisedHost()}:${getKanbanRuntimePort()}`;
 }
 
 export function getKanbanRuntimeWsOrigin(): string {
+	if (isKanbanRuntimeHttpsEnabled()) {
+		return `wss://${getKanbanRuntimeAdvertisedHost()}:${getKanbanRuntimeHttpsPort()}`;
+	}
 	return `ws://${getKanbanRuntimeAdvertisedHost()}:${getKanbanRuntimePort()}`;
 }
 
