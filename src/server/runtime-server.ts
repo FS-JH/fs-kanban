@@ -1,5 +1,11 @@
 import { readFile } from "node:fs/promises";
-import { createServer, type IncomingMessage } from "node:http";
+import {
+	createServer as createHttpServer,
+	type IncomingMessage,
+	type Server as HttpServer,
+	type ServerResponse,
+} from "node:http";
+import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
 import { join } from "node:path";
 import packageJson from "../../package.json" with { type: "json" };
 
@@ -8,8 +14,12 @@ import type { RuntimeCommandRunResponse, RuntimeWorkspaceStateResponse } from ".
 import {
 	buildKanbanRuntimeUrl,
 	getKanbanRuntimeHost,
+	getKanbanRuntimeHttpsPort,
 	getKanbanRuntimeOrigin,
 	getKanbanRuntimePort,
+	getKanbanRuntimeTlsCertPath,
+	getKanbanRuntimeTlsKeyPath,
+	isKanbanRuntimeHttpsEnabled,
 } from "../core/runtime-endpoint.js";
 import { loadWorkspaceContextById } from "../state/workspace-state.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
@@ -54,6 +64,8 @@ export interface RuntimeServer {
 	url: string;
 	close: () => Promise<void>;
 }
+
+type RuntimeHttpServer = HttpServer | HttpsServer;
 
 function readWorkspaceIdFromRequest(request: IncomingMessage, requestUrl: URL): string | null {
 	const headerValue = request.headers["x-kanban-workspace-id"];
@@ -188,7 +200,7 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 		createContext: async ({ req }) => await createTrpcContext(req),
 	});
 
-	const server = createServer(async (req, res) => {
+	const requestHandler = async (req: IncomingMessage, res: ServerResponse<IncomingMessage>) => {
 		try {
 			const requestUrl = new URL(req.url ?? "/", "http://localhost");
 			const pathname = normalizeRequestPath(requestUrl.pathname);
@@ -226,46 +238,92 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 			res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
 			res.end("Not Found");
 		}
-	});
-	server.on("upgrade", (request, socket, head) => {
-		let requestUrl: URL;
-		try {
-			requestUrl = new URL(request.url ?? "/", getKanbanRuntimeOrigin());
-		} catch {
-			socket.destroy();
-			return;
+	};
+
+	const httpServer = createHttpServer(requestHandler);
+	const servers: RuntimeHttpServer[] = [httpServer];
+
+	if (isKanbanRuntimeHttpsEnabled()) {
+		const tlsCertPath = getKanbanRuntimeTlsCertPath();
+		const tlsKeyPath = getKanbanRuntimeTlsKeyPath();
+		if (!tlsCertPath || !tlsKeyPath) {
+			throw new Error("HTTPS requested without both TLS cert and key paths.");
 		}
-		if (normalizeRequestPath(requestUrl.pathname) !== "/api/runtime/ws") {
-			return;
-		}
-		(request as IncomingMessage & { __kanbanUpgradeHandled?: boolean }).__kanbanUpgradeHandled = true;
-		const requestedWorkspaceId = requestUrl.searchParams.get("workspaceId")?.trim() || null;
-		deps.runtimeStateHub.handleUpgrade(request, socket, head, { requestedWorkspaceId });
-	});
+		const [cert, key] = await Promise.all([readFile(tlsCertPath), readFile(tlsKeyPath)]);
+		const httpsServer = createHttpsServer({ cert, key }, requestHandler);
+		servers.push(httpsServer);
+	}
+
+	const attachUpgradeHandlers = (server: RuntimeHttpServer) => {
+		server.on("upgrade", (request, socket, head) => {
+			let requestUrl: URL;
+			try {
+				requestUrl = new URL(request.url ?? "/", "http://localhost");
+			} catch {
+				socket.destroy();
+				return;
+			}
+			if (normalizeRequestPath(requestUrl.pathname) !== "/api/runtime/ws") {
+				return;
+			}
+			(request as IncomingMessage & { __kanbanUpgradeHandled?: boolean }).__kanbanUpgradeHandled = true;
+			const requestedWorkspaceId = requestUrl.searchParams.get("workspaceId")?.trim() || null;
+			deps.runtimeStateHub.handleUpgrade(request, socket, head, { requestedWorkspaceId });
+		});
+	};
+	for (const server of servers) {
+		attachUpgradeHandlers(server);
+	}
 	const terminalWebSocketBridge = createTerminalWebSocketBridge({
-		server,
+		servers,
 		resolveTerminalManager: (workspaceId) => deps.workspaceRegistry.getTerminalManagerForWorkspace(workspaceId),
 		isTerminalIoWebSocketPath: (pathname) => normalizeRequestPath(pathname) === "/api/terminal/io",
 		isTerminalControlWebSocketPath: (pathname) => normalizeRequestPath(pathname) === "/api/terminal/control",
 	});
-	server.on("upgrade", (request, socket) => {
-		const handled = (request as IncomingMessage & { __kanbanUpgradeHandled?: boolean }).__kanbanUpgradeHandled;
-		if (handled) {
-			return;
-		}
-		socket.destroy();
-	});
+	for (const server of servers) {
+		server.on("upgrade", (request, socket) => {
+			const handled = (request as IncomingMessage & { __kanbanUpgradeHandled?: boolean }).__kanbanUpgradeHandled;
+			if (handled) {
+				return;
+			}
+			socket.destroy();
+		});
+	}
 
 	await new Promise<void>((resolveListen, rejectListen) => {
-		server.once("error", rejectListen);
-		server.listen(getKanbanRuntimePort(), getKanbanRuntimeHost(), () => {
-			server.off("error", rejectListen);
-			resolveListen();
+		let settled = false;
+		let remainingServers = servers.length;
+		const onError = (error: Error) => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			rejectListen(error);
+		};
+		for (const server of servers) {
+			server.once("error", onError);
+		}
+		const onListening = (server: RuntimeHttpServer) => {
+			server.off("error", onError);
+			remainingServers -= 1;
+			if (!settled && remainingServers === 0) {
+				settled = true;
+				resolveListen();
+			}
+		};
+		httpServer.listen(getKanbanRuntimePort(), getKanbanRuntimeHost(), () => {
+			onListening(httpServer);
 		});
+		if (servers.length > 1) {
+			const httpsServer = servers[1];
+			httpsServer?.listen(getKanbanRuntimeHttpsPort(), getKanbanRuntimeHost(), () => {
+				onListening(httpsServer);
+			});
+		}
 	});
 
-	const address = server.address();
-	if (!address || typeof address === "string") {
+	const httpAddress = httpServer.address();
+	if (!httpAddress || typeof httpAddress === "string") {
 		throw new Error("Failed to start local server.");
 	}
 	const activeWorkspaceId = deps.workspaceRegistry.getActiveWorkspaceId();
@@ -278,15 +336,20 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 		close: async () => {
 			await deps.runtimeStateHub.close();
 			await terminalWebSocketBridge.close();
-			await new Promise<void>((resolveClose, rejectClose) => {
-				server.close((error) => {
-					if (error) {
-						rejectClose(error);
-						return;
-					}
-					resolveClose();
-				});
-			});
+			await Promise.all(
+				servers.map(
+					(server) =>
+						new Promise<void>((resolveClose, rejectClose) => {
+							server.close((error) => {
+								if (error) {
+									rejectClose(error);
+									return;
+								}
+								resolveClose();
+							});
+						}),
+				),
+			);
 		},
 	};
 }

@@ -1,4 +1,5 @@
-import type { IncomingMessage, Server } from "node:http";
+import type { IncomingMessage, Server as HttpServer } from "node:http";
+import type { Server as HttpsServer } from "node:https";
 import type { Socket } from "node:net";
 
 import type { RawData, WebSocket } from "ws";
@@ -6,7 +7,6 @@ import { WebSocketServer } from "ws";
 
 import type { RuntimeTerminalWsServerMessage } from "../core/api-contract.js";
 import { parseTerminalWsClientMessage } from "../core/api-validation.js";
-import { getKanbanRuntimeOrigin } from "../core/runtime-endpoint.js";
 import type { TerminalSessionService } from "./terminal-session-service.js";
 
 interface TerminalWebSocketConnectionContext {
@@ -19,7 +19,7 @@ interface UpgradeRequest extends IncomingMessage {
 }
 
 export interface CreateTerminalWebSocketBridgeRequest {
-	server: Server;
+	servers: Array<HttpServer | HttpsServer>;
 	resolveTerminalManager: (workspaceId: string) => TerminalSessionService | null;
 	isTerminalIoWebSocketPath: (pathname: string) => boolean;
 	isTerminalControlWebSocketPath: (pathname: string) => boolean;
@@ -72,56 +72,60 @@ function sendControlMessage(ws: WebSocket, message: RuntimeTerminalWsServerMessa
 }
 
 export function createTerminalWebSocketBridge({
-	server,
+	servers,
 	resolveTerminalManager,
 	isTerminalIoWebSocketPath,
 	isTerminalControlWebSocketPath,
 }: CreateTerminalWebSocketBridgeRequest): TerminalWebSocketBridge {
 	const activeSockets = new Set<Socket>();
-	server.on("connection", (socket: Socket) => {
-		socket.setNoDelay(true);
-		activeSockets.add(socket);
-		socket.on("close", () => {
-			activeSockets.delete(socket);
+	for (const server of servers) {
+		server.on("connection", (socket: Socket) => {
+			socket.setNoDelay(true);
+			activeSockets.add(socket);
+			socket.on("close", () => {
+				activeSockets.delete(socket);
+			});
 		});
-	});
+	}
 
 	const ioServer = new WebSocketServer({ noServer: true });
 	const controlServer = new WebSocketServer({ noServer: true });
 
-	server.on("upgrade", (request, socket, head) => {
-		try {
-			(socket as Socket).setNoDelay(true);
-			const upgradeRequest = request as UpgradeRequest;
-			const url = new URL(request.url ?? "/", getKanbanRuntimeOrigin());
-			const pathname = url.pathname;
-			const isIoRequest = isTerminalIoWebSocketPath(pathname);
-			const isControlRequest = isTerminalControlWebSocketPath(pathname);
-			if (!isIoRequest && !isControlRequest) {
-				return;
-			}
-			upgradeRequest.__kanbanUpgradeHandled = true;
+	for (const server of servers) {
+		server.on("upgrade", (request, socket, head) => {
+			try {
+				(socket as Socket).setNoDelay(true);
+				const upgradeRequest = request as UpgradeRequest;
+				const url = new URL(request.url ?? "/", "http://localhost");
+				const pathname = url.pathname;
+				const isIoRequest = isTerminalIoWebSocketPath(pathname);
+				const isControlRequest = isTerminalControlWebSocketPath(pathname);
+				if (!isIoRequest && !isControlRequest) {
+					return;
+				}
+				upgradeRequest.__kanbanUpgradeHandled = true;
 
-			const taskId = url.searchParams.get("taskId")?.trim();
-			const workspaceId = url.searchParams.get("workspaceId")?.trim();
-			if (!taskId || !workspaceId) {
-				socket.destroy();
-				return;
-			}
-			const terminalManager = resolveTerminalManager(workspaceId);
-			if (!terminalManager) {
-				socket.destroy();
-				return;
-			}
+				const taskId = url.searchParams.get("taskId")?.trim();
+				const workspaceId = url.searchParams.get("workspaceId")?.trim();
+				if (!taskId || !workspaceId) {
+					socket.destroy();
+					return;
+				}
+				const terminalManager = resolveTerminalManager(workspaceId);
+				if (!terminalManager) {
+					socket.destroy();
+					return;
+				}
 
-			const targetServer = isIoRequest ? ioServer : controlServer;
-			targetServer.handleUpgrade(request, socket, head, (ws: WebSocket) => {
-				targetServer.emit("connection", ws, { taskId, terminalManager });
-			});
-		} catch {
-			socket.destroy();
-		}
-	});
+				const targetServer = isIoRequest ? ioServer : controlServer;
+				targetServer.handleUpgrade(request, socket, head, (ws: WebSocket) => {
+					targetServer.emit("connection", ws, { taskId, terminalManager });
+				});
+			} catch {
+				socket.destroy();
+			}
+		});
+	}
 
 	ioServer.on("connection", (ws: WebSocket, context: unknown) => {
 		const taskId = (context as TerminalWebSocketConnectionContext).taskId;
