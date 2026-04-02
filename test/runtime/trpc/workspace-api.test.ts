@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
+	RuntimeBoardData,
 	RuntimeTaskSessionSummary,
 	RuntimeWorkspaceChangesResponse,
+	RuntimeWorkspaceStateResponse,
 } from "../../../src/core/api-contract.js";
 import { createWorkspaceApi } from "../../../src/trpc/workspace-api.js";
 
@@ -58,6 +60,21 @@ function createChangesResponse(): RuntimeWorkspaceChangesResponse {
 		repoRoot: "/tmp/worktree",
 		generatedAt: Date.now(),
 		files: [],
+	};
+}
+
+function createWorkspaceState(board: RuntimeBoardData): RuntimeWorkspaceStateResponse {
+	return {
+		repoPath: "/tmp/repo",
+		statePath: "/tmp/repo/.fs-kanban/state.json",
+		git: {
+			currentBranch: "main",
+			defaultBranch: "main",
+			branches: ["main"],
+		},
+		board,
+		sessions: {},
+		revision: 1,
 	};
 }
 
@@ -201,5 +218,69 @@ describe("createWorkspaceApi loadChanges", () => {
 		);
 
 		expect(workspaceChangesMocks.getWorkspaceChanges).toHaveBeenCalledWith("/tmp/worktree");
+	});
+});
+
+describe("createWorkspaceApi imported task lookup", () => {
+	it("returns the current column for a task imported from Notion", async () => {
+		const workspaceState = createWorkspaceState({
+			columns: [
+				{
+					id: "backlog",
+					title: "Backlog",
+					cards: [
+						{
+							id: "task-1",
+							prompt: "Imported task",
+							startInPlanMode: true,
+							externalSource: {
+								provider: "notion",
+								externalId: "page-1",
+								externalUrl: "https://notion.so/page-1",
+								repoKey: "fs-kanban",
+								itemType: "bug",
+								sourceUpdatedAt: "2026-04-02T00:00:00.000Z",
+								importedAt: 123,
+							},
+							baseRef: "main",
+							createdAt: 1,
+							updatedAt: 2,
+						},
+					],
+				},
+				{ id: "in_progress", title: "In Progress", cards: [] },
+				{ id: "review", title: "Review", cards: [] },
+				{ id: "trash", title: "Trash", cards: [] },
+			],
+			dependencies: [],
+		});
+
+		const api = createWorkspaceApi({
+			ensureTerminalManagerForWorkspace: vi.fn(async () => ({ listSummaries: vi.fn(() => []) } as never)),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastRuntimeProjectsUpdated: vi.fn(),
+			buildWorkspaceStateSnapshot: vi.fn(async () => workspaceState),
+		});
+
+		const result = await api.getImportedTaskByExternalSource(
+			{ workspaceId: "workspace-1", workspacePath: "/tmp/repo" },
+			{
+				externalSource: {
+					provider: "notion",
+					externalId: "page-1",
+					externalUrl: "https://notion.so/page-1",
+					repoKey: "fs-kanban",
+					itemType: "bug",
+					sourceUpdatedAt: "2026-04-02T00:00:00.000Z",
+				},
+			},
+		);
+
+		expect(result).toEqual({
+			found: true,
+			taskId: "task-1",
+			columnId: "backlog",
+			task: workspaceState.board.columns[0]?.cards[0],
+		});
 	});
 });
