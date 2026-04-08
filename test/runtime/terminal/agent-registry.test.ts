@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const commandDiscoveryMocks = vi.hoisted(() => ({
 	isBinaryAvailableOnPath: vi.fn(),
+	resolveBinaryLocation: vi.fn(),
 }));
 
 vi.mock("../../../src/terminal/command-discovery.js", () => ({
 	isBinaryAvailableOnPath: commandDiscoveryMocks.isBinaryAvailableOnPath,
+	resolveBinaryLocation: commandDiscoveryMocks.resolveBinaryLocation,
 }));
 
 import type { RuntimeConfigState } from "../../../src/config/runtime-config.js";
@@ -36,6 +38,8 @@ function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): 
 beforeEach(() => {
 	commandDiscoveryMocks.isBinaryAvailableOnPath.mockReset();
 	commandDiscoveryMocks.isBinaryAvailableOnPath.mockReturnValue(false);
+	commandDiscoveryMocks.resolveBinaryLocation.mockReset();
+	commandDiscoveryMocks.resolveBinaryLocation.mockReturnValue(null);
 	delete process.env.KANBAN_DEBUG_MODE;
 	delete process.env.DEBUG_MODE;
 	delete process.env.debug_mode;
@@ -58,6 +62,22 @@ describe("agent-registry", () => {
 
 		expect(resolved).toBeNull();
 	});
+
+	it("uses a resolved absolute binary path when the agent is installed outside PATH", () => {
+		commandDiscoveryMocks.resolveBinaryLocation.mockImplementation((binary: string) =>
+			binary === "claude" ? "/Users/test/Library/Application Support/Claude/claude-code-vm/2.1.92/claude" : null,
+		);
+
+		const resolved = resolveAgentCommand(createRuntimeConfigState({ selectedAgentId: "claude" }));
+
+		expect(resolved).toEqual({
+			agentId: "claude",
+			label: "Claude Code",
+			command: "claude",
+			binary: "/Users/test/Library/Application Support/Claude/claude-code-vm/2.1.92/claude",
+			args: [],
+		});
+	});
 });
 
 describe("buildRuntimeConfigResponse", () => {
@@ -79,6 +99,9 @@ describe("buildRuntimeConfigResponse", () => {
 			agentAutonomousModeEnabled: false,
 		});
 		commandDiscoveryMocks.isBinaryAvailableOnPath.mockImplementation((binary: string) => binary === "claude");
+		commandDiscoveryMocks.resolveBinaryLocation.mockImplementation((binary: string) =>
+			binary === "claude" ? "/resolved/claude" : null,
+		);
 
 		const response = buildRuntimeConfigResponse(config);
 
@@ -88,6 +111,7 @@ describe("buildRuntimeConfigResponse", () => {
 		expect(response.agents.find((agent) => agent.id === "codex")?.defaultArgs).toEqual([]);
 		expect(response.agents.find((agent) => agent.id === "claude")?.command).toBe("claude");
 		expect(response.agents.find((agent) => agent.id === "codex")?.command).toBe("codex");
+		expect(response.effectiveCommand).toBe("claude");
 	});
 
 	it("sets debug mode from runtime environment variables", () => {

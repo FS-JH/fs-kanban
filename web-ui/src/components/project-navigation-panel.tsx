@@ -1,6 +1,6 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ChevronDown, ChevronUp, Ellipsis, Plus } from "lucide-react";
+import { ChevronDown, ChevronUp, Ellipsis, LayoutGrid, Plus } from "lucide-react";
 import { type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
@@ -31,11 +31,13 @@ export function ProjectNavigationPanel({
 	projects,
 	isLoadingProjects = false,
 	currentProjectId,
+	isAllProjectsSelected = false,
 	removingProjectId,
 	activeSection,
 	onActiveSectionChange,
 	canShowAgentSection,
 	agentSectionContent,
+	onSelectAllProjects,
 	onSelectProject,
 	onRemoveProject,
 	onAddProject,
@@ -43,16 +45,22 @@ export function ProjectNavigationPanel({
 	projects: RuntimeProjectSummary[];
 	isLoadingProjects?: boolean;
 	currentProjectId: string | null;
+	isAllProjectsSelected?: boolean;
 	removingProjectId: string | null;
 	activeSection: "projects" | "agent";
 	onActiveSectionChange: (section: "projects" | "agent") => void;
 	canShowAgentSection: boolean;
 	agentSectionContent?: ReactNode;
+	onSelectAllProjects: () => void;
 	onSelectProject: (projectId: string) => void;
 	onRemoveProject: (projectId: string) => Promise<boolean>;
 	onAddProject: () => void;
 }): React.ReactElement {
 	const sortedProjects = [...projects].sort((a, b) => a.path.localeCompare(b.path));
+	const allProjectsTaskCount = projects.reduce(
+		(total, project) => total + project.taskCounts.in_progress + project.taskCounts.review,
+		0,
+	);
 
 
 	const [pendingProjectRemoval, setPendingProjectRemoval] = useState<RuntimeProjectSummary | null>(null);
@@ -114,6 +122,19 @@ export function ProjectNavigationPanel({
 				}}
 			>
 				<div onMouseDown={startDrag} className="absolute top-0 right-0 bottom-0 w-1.5 cursor-ew-resize z-10 hover:bg-accent/20" />
+				<button
+					type="button"
+					title="All projects"
+					onClick={onSelectAllProjects}
+					className={cn(
+						"w-8 h-8 rounded-md text-xs font-semibold shrink-0 border-0 cursor-pointer flex items-center justify-center",
+						isAllProjectsSelected
+							? "bg-accent text-white"
+							: "bg-surface-3 text-text-secondary hover:text-text-primary hover:bg-surface-4",
+					)}
+				>
+					<LayoutGrid size={15} />
+				</button>
 				{sortedProjects.map((project) => {
 					const isCurrent = currentProjectId === project.id;
 					const letter = project.name.charAt(0).toUpperCase();
@@ -215,6 +236,32 @@ export function ProjectNavigationPanel({
 									<ProjectRowSkeleton key={`project-skeleton-${index}`} />
 								))}
 							</div>
+						) : null}
+
+						{projects.length > 0 ? (
+							<button
+								type="button"
+								onClick={onSelectAllProjects}
+								className={cn(
+									"kb-project-row flex cursor-pointer items-center gap-2 rounded-md text-left",
+									isAllProjectsSelected
+										? "kb-project-row-selected"
+										: "text-text-secondary hover:text-text-primary",
+								)}
+								style={{ padding: "6px 8px" }}
+							>
+								<span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2">
+									<LayoutGrid size={13} />
+								</span>
+								<span className="min-w-0 flex-1">
+									<span className={cn("block truncate text-sm font-medium", isAllProjectsSelected ? "text-white" : "text-text-primary")}>
+										All Projects
+									</span>
+									<span className={cn("block text-[10px]", isAllProjectsSelected ? "text-white/60" : "text-text-secondary")}>
+										{allProjectsTaskCount} active {allProjectsTaskCount === 1 ? "task" : "tasks"}
+									</span>
+								</span>
+							</button>
 						) : null}
 
 						{sortedProjects.map((project) => (
