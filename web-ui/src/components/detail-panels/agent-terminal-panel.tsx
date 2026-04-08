@@ -1,6 +1,7 @@
 import "@xterm/xterm/css/xterm.css";
 
-import { Command, Maximize2, MessageSquare, Minimize2, X } from "lucide-react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { Command, Ellipsis, Maximize2, MessageSquare, Minimize2, Trash2, X } from "lucide-react";
 import type { MutableRefObject, ReactElement } from "react";
 import { useMemo } from "react";
 
@@ -143,6 +144,66 @@ function AgentTerminalReviewActions({
 			>
 				{isOpenPrLoading ? "..." : "Open PR"}
 			</Button>
+		</div>
+	);
+}
+
+function getTaskLifecycleHint(taskColumnId: string): string | null {
+	if (taskColumnId === "review") {
+		return "Review holds finished cards until you commit, open a PR, or clean them up. Trash is cleanup, not archive.";
+	}
+	if (taskColumnId === "in_progress") {
+		return "Trash abandons this task and deletes its worktree after confirmation.";
+	}
+	return null;
+}
+
+function AgentTerminalTaskActions({
+	taskColumnId,
+	onMoveToTrash,
+	isMoveToTrashLoading,
+}: {
+	taskColumnId: string;
+	onMoveToTrash: () => void;
+	isMoveToTrashLoading: boolean;
+}): ReactElement {
+	const lifecycleHint = getTaskLifecycleHint(taskColumnId);
+
+	return (
+		<div className="flex items-start justify-between gap-3 rounded-md border border-border bg-surface-1 px-3 py-2">
+			{lifecycleHint ? <p className="text-xs leading-5 text-text-secondary">{lifecycleHint}</p> : <span />}
+			<DropdownMenu.Root>
+				<DropdownMenu.Trigger asChild>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="shrink-0"
+						icon={isMoveToTrashLoading ? <Spinner size={12} /> : undefined}
+						iconRight={isMoveToTrashLoading ? undefined : <Ellipsis size={14} />}
+						disabled={isMoveToTrashLoading}
+						aria-label="Task actions"
+					>
+						Actions
+					</Button>
+				</DropdownMenu.Trigger>
+				<DropdownMenu.Portal>
+					<DropdownMenu.Content
+						side="top"
+						align="end"
+						sideOffset={6}
+						className="z-50 min-w-[180px] rounded-md border border-border-bright bg-surface-1 p-1 shadow-lg"
+						onCloseAutoFocus={(event) => event.preventDefault()}
+					>
+						<DropdownMenu.Item
+							className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-[13px] text-status-red outline-none cursor-pointer data-[highlighted]:bg-surface-3"
+							onSelect={onMoveToTrash}
+						>
+							<Trash2 size={14} />
+							Move to Trash
+						</DropdownMenu.Item>
+					</DropdownMenu.Content>
+				</DropdownMenu.Portal>
+			</DropdownMenu.Root>
 		</div>
 	);
 }
@@ -358,14 +419,11 @@ function AgentTerminalPanelLayout({
 							{cancelAutomaticActionLabel}
 						</Button>
 					) : null}
-					<Button
-						variant="danger"
-						fill
-						disabled={isMoveToTrashLoading}
-						onClick={onMoveToTrash}
-					>
-						{isMoveToTrashLoading ? <Spinner size={14} /> : "Move Card To Trash"}
-					</Button>
+					<AgentTerminalTaskActions
+						taskColumnId={taskColumnId}
+						onMoveToTrash={onMoveToTrash}
+						isMoveToTrashLoading={isMoveToTrashLoading}
+					/>
 				</div>
 			) : null}
 			{!showMoveToTrash && retryAgentOptions.length > 0 && onRetryWithAgent ? (
