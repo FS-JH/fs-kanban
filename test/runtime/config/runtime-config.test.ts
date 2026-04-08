@@ -174,6 +174,37 @@ describe.sequential("runtime-config auto agent selection", () => {
 		}
 	});
 
+	it("auto-selects Claude from the macOS desktop install location when PATH does not expose it", async () => {
+		if (process.platform !== "darwin") {
+			return;
+		}
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-claude-desktop-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-claude-desktop-");
+		const { path: tempBin, cleanup: cleanupBin } = createTempDir("kanban-bin-runtime-config-claude-desktop-");
+
+		try {
+			const claudeDesktopBin = join(
+				tempHome,
+				"Library",
+				"Application Support",
+				"Claude",
+				"claude-code-vm",
+				"2.1.92",
+			);
+			writeFakeCommand(claudeDesktopBin, "claude");
+
+			await withTemporaryEnv({ home: tempHome, pathPrefix: tempBin, replacePath: true }, async () => {
+				const state = await loadRuntimeConfig(tempProject);
+				expect(state.selectedAgentId).toBe("claude");
+				expect(existsSync(getGlobalRuntimeConfigPath(tempHome))).toBe(true);
+			});
+		} finally {
+			cleanupBin();
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
 	it("treats the home directory as global-only config scope", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-home-scope-");
 
