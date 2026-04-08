@@ -5,6 +5,16 @@ import type { BoardData, TaskAutoReviewMode } from "@/types";
 export const TASK_START_IN_PLAN_MODE_STORAGE_KEY = LocalStorageKey.TaskStartInPlanMode;
 export const TASK_AUTO_REVIEW_ENABLED_STORAGE_KEY = LocalStorageKey.TaskAutoReviewEnabled;
 export const TASK_AUTO_REVIEW_MODE_STORAGE_KEY = LocalStorageKey.TaskAutoReviewMode;
+export const ALL_PROJECTS_PATHNAME = "/all-projects";
+
+export type NavigationTarget =
+	| {
+			kind: "project";
+			projectId: string | null;
+	  }
+	| {
+			kind: "all-projects";
+	  };
 
 export function normalizeStoredTaskAutoReviewMode(value: string): TaskAutoReviewMode | null {
 	if (value === "commit" || value === "pr" || value === "move_to_trash") {
@@ -52,23 +62,49 @@ export function countTasksByColumn(board: BoardData): {
 }
 
 export function parseProjectIdFromPathname(pathname: string): string | null {
+	const target = parseNavigationTargetFromPathname(pathname);
+	return target.kind === "project" ? target.projectId : null;
+}
+
+export function parseNavigationTargetFromPathname(pathname: string): NavigationTarget {
 	const segments = pathname.split("/").filter((segment) => segment.length > 0);
 	if (segments.length === 0) {
-		return null;
+		return {
+			kind: "project",
+			projectId: null,
+		};
 	}
 	const firstSegment = segments[0];
 	if (!firstSegment) {
-		return null;
+		return {
+			kind: "project",
+			projectId: null,
+		};
+	}
+	if (firstSegment === "all-projects") {
+		return {
+			kind: "all-projects",
+		};
 	}
 	try {
-		return decodeURIComponent(firstSegment);
+		return {
+			kind: "project",
+			projectId: decodeURIComponent(firstSegment),
+		};
 	} catch {
-		return null;
+		return {
+			kind: "project",
+			projectId: null,
+		};
 	}
 }
 
 export function buildProjectPathname(projectId: string): string {
 	return `/${encodeURIComponent(projectId)}`;
+}
+
+export function buildAllProjectsPathname(): string {
+	return ALL_PROJECTS_PATHNAME;
 }
 
 export function createIdleTaskSession(taskId: string): RuntimeTaskSessionSummary {

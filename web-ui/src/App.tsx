@@ -6,6 +6,7 @@ import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { notifyError, showAppToast } from "@/components/app-toaster";
+import { ActiveProjectsBoard } from "@/components/active-projects-board";
 import { CardDetailView } from "@/components/card-detail-view";
 import { ClearTrashDialog } from "@/components/clear-trash-dialog";
 import { DebugDialog } from "@/components/debug-dialog";
@@ -33,6 +34,8 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { createInitialBoardData } from "@/data/board-data";
 import { createIdleTaskSession } from "@/hooks/app-utils";
+import { useAggregateBoard } from "@/hooks/use-aggregate-board";
+import { useAggregateBoardActions } from "@/hooks/use-aggregate-board-actions";
 import { RuntimeDisconnectedFallback } from "@/hooks/runtime-disconnected-fallback";
 import { useAppHotkeys } from "@/hooks/use-app-hotkeys";
 import { useBoardInteractions } from "@/hooks/use-board-interactions";
@@ -53,11 +56,12 @@ import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useTaskStartActions } from "@/hooks/use-task-start-actions";
 import { useTerminalPanels } from "@/hooks/use-terminal-panels";
 import { useWorkspaceSync } from "@/hooks/use-workspace-sync";
+import { useWorkspaceSnapshotCache } from "@/hooks/use-workspace-snapshot-cache";
 import {
 	getTaskAgentNavbarHint,
 	isTaskAgentSetupSatisfied,
 } from "@/runtime/native-agent";
-import type { RuntimeTaskSessionSummary } from "@/runtime/types";
+import type { RuntimeAggregateBoardCard, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { useRuntimeProjectConfig } from "@/runtime/use-runtime-project-config";
 import { useTerminalConnectionReady } from "@/runtime/use-terminal-connection-ready";
 import { useWorkspacePersistence } from "@/runtime/use-workspace-persistence";
@@ -83,6 +87,10 @@ export default function App(): ReactElement {
 	const [isClearTrashDialogOpen, setIsClearTrashDialogOpen] = useState(false);
 	const [isGitHistoryOpen, setIsGitHistoryOpen] = useState(false);
 	const [pendingTaskStartAfterEditId, setPendingTaskStartAfterEditId] = useState<string | null>(null);
+	const [pendingAggregateCardSelection, setPendingAggregateCardSelection] = useState<{
+		workspaceId: string;
+		taskId: string;
+	} | null>(null);
 	const taskEditorResetRef = useRef<() => void>(() => {});
 	const lastStreamErrorRef = useRef<string | null>(null);
 	const handleProjectSwitchStart = useCallback(() => {
@@ -93,6 +101,7 @@ export default function App(): ReactElement {
 		taskEditorResetRef.current();
 	}, []);
 	const {
+		isAggregateView,
 		currentProjectId,
 		projects,
 		workspaceState: streamedWorkspaceState,
@@ -106,6 +115,7 @@ export default function App(): ReactElement {
 		hasNoProjects,
 		isProjectSwitching,
 		handleSelectProject,
+		handleSelectAllProjects,
 		handleAddProject,
 		handleConfirmInitializeGitProject,
 		handleCancelInitializeGitProject,
@@ -116,6 +126,13 @@ export default function App(): ReactElement {
 	} = useProjectNavigation({
 		onProjectSwitchStart: handleProjectSwitchStart,
 	});
+	const {
+		projects: aggregateProjects,
+		board: aggregateBoard,
+		streamError: aggregateStreamError,
+		isRuntimeDisconnected: isAggregateRuntimeDisconnected,
+		hasReceivedSnapshot: hasReceivedAggregateSnapshot,
+	} = useAggregateBoard(isAggregateView);
 	const activeNotificationWorkspaceId = navigationCurrentProjectId;
 	const isDocumentVisible = useDocumentVisibility();
 	const isInitialRuntimeLoad =
@@ -212,6 +229,11 @@ export default function App(): ReactElement {
 		setSessions,
 		setCanPersistWorkspaceState,
 	});
+	const { getCachedWorkspaceSnapshot } = useWorkspaceSnapshotCache({
+		currentProjectId,
+		workspaceState: streamedWorkspaceState,
+		workspaceMetadata,
+	});
 
 	useEffect(() => {
 		replaceWorkspaceMetadata(workspaceMetadata);
@@ -244,6 +266,17 @@ export default function App(): ReactElement {
 		isWorkspaceMetadataPending,
 		hasReceivedSnapshot,
 	});
+	const cachedNavigationWorkspaceSnapshot =
+		isAggregateView || !isProjectSwitching ? null : getCachedWorkspaceSnapshot(navigationCurrentProjectId);
+	const displayedBoard = cachedNavigationWorkspaceSnapshot?.workspaceState.board ?? board;
+	const displayedSessions = cachedNavigationWorkspaceSnapshot?.workspaceState.sessions ?? sessions;
+	const displayedWorkspacePath = cachedNavigationWorkspaceSnapshot?.workspaceState.repoPath ?? workspacePath;
+	const sidebarProjects =
+		isAggregateView && hasReceivedAggregateSnapshot ? aggregateProjects : displayedProjects;
+	const sidebarIsLoadingProjects =
+		isAggregateView && !hasReceivedAggregateSnapshot && !aggregateStreamError ? true : isProjectListLoading;
+	const shouldShowProjectLoadingStateWithCache =
+		shouldShowProjectLoadingState && cachedNavigationWorkspaceSnapshot === null;
 
 	useReviewReadyNotifications({
 		activeWorkspaceId: activeNotificationWorkspaceId,
@@ -366,6 +399,15 @@ export default function App(): ReactElement {
 		isGitHistoryOpen,
 		refreshWorkspaceState,
 	});
+	const {
+		commitTaskLoadingById: aggregateCommitTaskLoadingById,
+		openPrTaskLoadingById: aggregateOpenPrTaskLoadingById,
+		moveToTrashLoadingById: aggregateMoveToTrashLoadingById,
+		handleCommitTask: handleAggregateCommitTask,
+		handleOpenPrTask: handleAggregateOpenPrTask,
+		handleMoveToTrashTask: handleAggregateMoveToTrashTask,
+		handleCancelAutomaticTaskAction: handleAggregateCancelAutomaticTaskAction,
+	} = useAggregateBoardActions();
 	const agentCommand = runtimeProjectConfig?.effectiveCommand ?? null;
 	const {
 		homeTerminalTaskId,
@@ -510,6 +552,17 @@ export default function App(): ReactElement {
 	}, [selectedTaskId, selectedCard]);
 
 	useEffect(() => {
+		if (!pendingAggregateCardSelection) {
+			return;
+		}
+		if (currentProjectId !== pendingAggregateCardSelection.workspaceId) {
+			return;
+		}
+		setSelectedTaskId(pendingAggregateCardSelection.taskId);
+		setPendingAggregateCardSelection(null);
+	}, [currentProjectId, pendingAggregateCardSelection]);
+
+	useEffect(() => {
 		if (selectedCard) {
 			return;
 		}
@@ -530,6 +583,16 @@ export default function App(): ReactElement {
 		setSelectedTaskId(null);
 		setIsGitHistoryOpen(false);
 	}, []);
+	const handleAggregateCardSelect = useCallback(
+		(card: RuntimeAggregateBoardCard) => {
+			setPendingAggregateCardSelection({
+				workspaceId: card.workspaceId,
+				taskId: card.card.id,
+			});
+			handleSelectProject(card.workspaceId);
+		},
+		[handleSelectProject],
+	);
 
 	const handleOpenSettings = useCallback((section?: RuntimeSettingsSection) => {
 		setSettingsInitialSection(section ?? null);
@@ -607,7 +670,7 @@ export default function App(): ReactElement {
 		isDetailTerminalOpen,
 		isHomeTerminalOpen: showHomeBottomTerminal,
 		isHomeGitHistoryOpen: !selectedCard && isGitHistoryOpen,
-		canUseCreateTaskShortcut: !hasNoProjects && currentProjectId !== null,
+		canUseCreateTaskShortcut: !isAggregateView && !hasNoProjects && currentProjectId !== null,
 		handleToggleDetailTerminal,
 		handleToggleHomeTerminal,
 		handleToggleExpandDetailTerminal,
@@ -655,11 +718,13 @@ export default function App(): ReactElement {
 	const activeWorkspacePath = selectedCard
 		? (getTaskWorkspaceInfo(selectedCard.card.id, selectedCard.card.baseRef)?.path ??
 			getTaskWorkspaceSnapshot(selectedCard.card.id)?.path ??
-			workspacePath ??
+			displayedWorkspacePath ??
 			undefined)
+		: isAggregateView
+			? "All Projects"
 		: shouldUseNavigationPath
 			? (navigationProjectPath ?? undefined)
-			: (workspacePath ?? undefined);
+			: (displayedWorkspacePath ?? undefined);
 
 	const activeWorkspaceHint = useMemo(() => {
 		if (!selectedCard) {
@@ -679,7 +744,7 @@ export default function App(): ReactElement {
 	const navbarWorkspaceHint = hasNoProjects ? undefined : activeWorkspaceHint;
 	const navbarRuntimeHint = hasNoProjects ? undefined : runtimeHint;
 	const shouldHideProjectDependentTopBarActions =
-		!selectedCard && (isProjectSwitching || isAwaitingWorkspaceSnapshot || isWorkspaceMetadataPending);
+		isAggregateView || (!selectedCard && (isProjectSwitching || isAwaitingWorkspaceSnapshot || isWorkspaceMetadataPending));
 
 	const {
 		openTargetOptions,
@@ -689,8 +754,8 @@ export default function App(): ReactElement {
 		canOpenWorkspace,
 		isOpeningWorkspace,
 	} = useOpenWorkspace({
-		currentProjectId,
-		workspacePath: activeWorkspacePath,
+		currentProjectId: isAggregateView ? null : currentProjectId,
+		workspacePath: isAggregateView ? undefined : activeWorkspacePath,
 	});
 	const handleCreateDialogOpenChange = useCallback(
 		(open: boolean) => {
@@ -731,25 +796,27 @@ export default function App(): ReactElement {
 		/>
 	) : undefined;
 
-	if (isRuntimeDisconnected) {
+	if ((isAggregateView && isAggregateRuntimeDisconnected) || (!isAggregateView && isRuntimeDisconnected)) {
 		return <RuntimeDisconnectedFallback />;
 	}
 
 	return (
 		<div className="flex h-[100svh] min-w-0 overflow-hidden">
-			{!selectedCard ? (
-				<ProjectNavigationPanel
-					projects={displayedProjects}
-					isLoadingProjects={isProjectListLoading}
-					currentProjectId={navigationCurrentProjectId}
-					removingProjectId={removingProjectId}
-					activeSection={homeSidebarSection}
-					onActiveSectionChange={setHomeSidebarSection}
-					canShowAgentSection={!hasNoProjects && Boolean(currentProjectId)}
-					agentSectionContent={homeSidebarAgentPanel}
-					onSelectProject={(projectId) => {
-						void handleSelectProject(projectId);
-					}}
+				{!selectedCard ? (
+					<ProjectNavigationPanel
+						projects={sidebarProjects}
+						isLoadingProjects={sidebarIsLoadingProjects}
+						currentProjectId={navigationCurrentProjectId}
+						isAllProjectsSelected={isAggregateView}
+						removingProjectId={removingProjectId}
+						activeSection={homeSidebarSection}
+						onActiveSectionChange={setHomeSidebarSection}
+						canShowAgentSection={!isAggregateView && !hasNoProjects && Boolean(currentProjectId)}
+						agentSectionContent={homeSidebarAgentPanel}
+						onSelectAllProjects={handleSelectAllProjects}
+						onSelectProject={(projectId) => {
+							void handleSelectProject(projectId);
+						}}
 					onRemoveProject={handleRemoveProject}
 					onAddProject={() => {
 						void handleAddProject();
@@ -760,56 +827,60 @@ export default function App(): ReactElement {
 				<TopBar
 					onBack={selectedCard ? handleBack : undefined}
 					workspacePath={navbarWorkspacePath}
-					isWorkspacePathLoading={shouldShowProjectLoadingState}
+					isWorkspacePathLoading={shouldShowProjectLoadingStateWithCache}
 					workspaceHint={navbarWorkspaceHint}
 					runtimeHint={navbarRuntimeHint}
 					selectedTaskId={selectedCard?.card.id ?? null}
 					selectedTaskBaseRef={selectedCard?.card.baseRef ?? null}
-					showHomeGitSummary={!hasNoProjects && !selectedCard}
-					runningGitAction={selectedCard || hasNoProjects ? null : runningGitAction}
+					showHomeGitSummary={!isAggregateView && !hasNoProjects && !selectedCard}
+					runningGitAction={selectedCard || hasNoProjects || isAggregateView ? null : runningGitAction}
 					onGitFetch={
-						selectedCard
+						selectedCard || isAggregateView
 							? undefined
 							: () => {
 									void runGitAction("fetch");
 								}
 					}
 					onGitPull={
-						selectedCard
+						selectedCard || isAggregateView
 							? undefined
 							: () => {
 									void runGitAction("pull");
 								}
 					}
 					onGitPush={
-						selectedCard
+						selectedCard || isAggregateView
 							? undefined
 							: () => {
 									void runGitAction("push");
 								}
 					}
 					onToggleTerminal={
-						hasNoProjects ? undefined : selectedCard ? handleToggleDetailTerminal : handleToggleHomeTerminal
+						hasNoProjects || isAggregateView
+							? undefined
+							: selectedCard
+								? handleToggleDetailTerminal
+								: handleToggleHomeTerminal
 					}
-					isTerminalOpen={selectedCard ? isDetailTerminalOpen : showHomeBottomTerminal}
-					isTerminalLoading={selectedCard ? isDetailTerminalStarting : isHomeTerminalStarting}
+					isTerminalOpen={isAggregateView ? false : selectedCard ? isDetailTerminalOpen : showHomeBottomTerminal}
+					isTerminalLoading={isAggregateView ? false : selectedCard ? isDetailTerminalStarting : isHomeTerminalStarting}
 					onOpenSettings={handleOpenSettings}
 					showDebugButton={debugModeEnabled}
 					onOpenDebugDialog={debugModeEnabled ? handleOpenDebugDialog : undefined}
-					shortcuts={shortcuts}
+					shortcuts={isAggregateView ? [] : shortcuts}
 					selectedShortcutLabel={selectedShortcutLabel}
 					onSelectShortcutLabel={handleSelectShortcutLabel}
 					runningShortcutLabel={runningShortcutLabel}
-					onRunShortcut={handleRunShortcut}
-					onCreateFirstShortcut={currentProjectId ? handleCreateShortcut : undefined}
+					onRunShortcut={isAggregateView ? undefined : handleRunShortcut}
+					onCreateFirstShortcut={isAggregateView ? undefined : currentProjectId ? handleCreateShortcut : undefined}
 					openTargetOptions={openTargetOptions}
 					selectedOpenTargetId={selectedOpenTargetId}
 					onSelectOpenTarget={onSelectOpenTarget}
 					onOpenWorkspace={onOpenWorkspace}
 					canOpenWorkspace={canOpenWorkspace}
 					isOpeningWorkspace={isOpeningWorkspace}
-					onToggleGitHistory={hasNoProjects ? undefined : handleToggleGitHistory}
-					isGitHistoryOpen={isGitHistoryOpen}
+					onToggleGitHistory={hasNoProjects || isAggregateView ? undefined : handleToggleGitHistory}
+					isGitHistoryOpen={isAggregateView ? false : isGitHistoryOpen}
 					hideProjectDependentActions={shouldHideProjectDependentTopBarActions}
 				/>
 				<div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden">
@@ -818,7 +889,7 @@ export default function App(): ReactElement {
 						aria-hidden={selectedCard ? true : undefined}
 						style={selectedCard ? { visibility: "hidden" } : undefined}
 					>
-						{shouldShowProjectLoadingState ? (
+						{shouldShowProjectLoadingStateWithCache ? (
 							<div className="flex flex-1 min-h-0 items-center justify-center bg-surface-0">
 								<Spinner size={30} />
 							</div>
@@ -843,7 +914,19 @@ export default function App(): ReactElement {
 						) : (
 							<div className="flex flex-1 flex-col min-h-0 min-w-0">
 								<div className="flex flex-1 min-h-0 min-w-0">
-									{isGitHistoryOpen ? (
+									{isAggregateView ? (
+										<ActiveProjectsBoard
+											data={aggregateBoard}
+											onCardSelect={handleAggregateCardSelect}
+											onCommitTask={handleAggregateCommitTask}
+											onOpenPrTask={handleAggregateOpenPrTask}
+											onMoveToTrashTask={handleAggregateMoveToTrashTask}
+											onCancelAutomaticTaskAction={handleAggregateCancelAutomaticTaskAction}
+											commitTaskLoadingById={aggregateCommitTaskLoadingById}
+											openPrTaskLoadingById={aggregateOpenPrTaskLoadingById}
+											moveToTrashLoadingById={aggregateMoveToTrashLoadingById}
+										/>
+									) : isGitHistoryOpen ? (
 										<GitHistoryView
 											workspaceId={currentProjectId}
 											gitHistory={gitHistory}
@@ -856,37 +939,42 @@ export default function App(): ReactElement {
 											isDiscardWorkingChangesPending={isDiscardingHomeWorkingChanges}
 										/>
 									) : (
-										<KanbanBoard
-											data={board}
-											taskSessions={sessions}
-											workspacePath={workspacePath}
-											onCardSelect={handleCardSelect}
-											onCreateTask={handleOpenCreateTask}
-											onStartTask={handleStartTaskFromBoard}
-											onStartAllTasks={handleStartAllBacklogTasksFromBoard}
-											onClearTrash={handleOpenClearTrash}
-											editingTaskId={editingTaskId}
-											inlineTaskEditor={inlineTaskEditor}
-											onEditTask={handleOpenEditTask}
-											onCommitTask={handleCommitTask}
-											onOpenPrTask={handleOpenPrTask}
-											onCancelAutomaticTaskAction={handleCancelAutomaticTaskAction}
-											commitTaskLoadingById={commitTaskLoadingById}
-											openPrTaskLoadingById={openPrTaskLoadingById}
-											moveToTrashLoadingById={moveToTrashLoadingById}
-											onMoveToTrashTask={handleMoveReviewCardToTrash}
-											onRestoreFromTrashTask={handleRestoreTaskFromTrash}
-											dependencies={board.dependencies}
-											onCreateDependency={handleCreateDependency}
-											onDeleteDependency={handleDeleteDependency}
-											onRequestProgrammaticCardMoveReady={
-												selectedCard ? undefined : handleProgrammaticCardMoveReady
-											}
-											onDragEnd={handleDragEnd}
-										/>
+										<div
+											className="flex flex-1 min-h-0 min-w-0"
+											style={isProjectSwitching ? { pointerEvents: "none" } : undefined}
+										>
+											<KanbanBoard
+												data={displayedBoard}
+												taskSessions={displayedSessions}
+												workspacePath={displayedWorkspacePath}
+												onCardSelect={handleCardSelect}
+												onCreateTask={handleOpenCreateTask}
+												onStartTask={handleStartTaskFromBoard}
+												onStartAllTasks={handleStartAllBacklogTasksFromBoard}
+												onClearTrash={handleOpenClearTrash}
+												editingTaskId={editingTaskId}
+												inlineTaskEditor={inlineTaskEditor}
+												onEditTask={handleOpenEditTask}
+												onCommitTask={handleCommitTask}
+												onOpenPrTask={handleOpenPrTask}
+												onCancelAutomaticTaskAction={handleCancelAutomaticTaskAction}
+												commitTaskLoadingById={commitTaskLoadingById}
+												openPrTaskLoadingById={openPrTaskLoadingById}
+												moveToTrashLoadingById={moveToTrashLoadingById}
+												onMoveToTrashTask={handleMoveReviewCardToTrash}
+												onRestoreFromTrashTask={handleRestoreTaskFromTrash}
+												dependencies={displayedBoard.dependencies}
+												onCreateDependency={handleCreateDependency}
+												onDeleteDependency={handleDeleteDependency}
+												onRequestProgrammaticCardMoveReady={
+													selectedCard ? undefined : handleProgrammaticCardMoveReady
+												}
+												onDragEnd={handleDragEnd}
+											/>
+										</div>
 									)}
 								</div>
-								{showHomeBottomTerminal ? (
+								{!isAggregateView && showHomeBottomTerminal ? (
 									<ResizableBottomPane
 										minHeight={200}
 										initialHeight={homeTerminalPaneHeight}

@@ -369,6 +369,37 @@ export const runtimeTaskWorkspaceMetadataSchema = z.object({
 });
 export type RuntimeTaskWorkspaceMetadata = z.infer<typeof runtimeTaskWorkspaceMetadataSchema>;
 
+export const runtimeAggregateBoardCardSchema = z.object({
+	key: z.string(),
+	workspaceId: z.string(),
+	projectName: z.string(),
+	projectPath: z.string(),
+	columnId: z.enum(["in_progress", "review"]),
+	card: runtimeBoardCardSchema,
+	session: runtimeTaskSessionSummarySchema.nullable(),
+	taskWorkspace: runtimeTaskWorkspaceMetadataSchema.nullable(),
+});
+export type RuntimeAggregateBoardCard = z.infer<typeof runtimeAggregateBoardCardSchema>;
+
+export const runtimeAggregateBoardColumnSchema = z.object({
+	id: z.enum(["in_progress", "review"]),
+	title: z.string(),
+	cards: z.array(runtimeAggregateBoardCardSchema),
+});
+export type RuntimeAggregateBoardColumn = z.infer<typeof runtimeAggregateBoardColumnSchema>;
+
+export const runtimeAggregateBoardDataSchema = z.object({
+	columns: z.array(runtimeAggregateBoardColumnSchema),
+});
+export type RuntimeAggregateBoardData = z.infer<typeof runtimeAggregateBoardDataSchema>;
+
+export const runtimeAggregateBoardSnapshotSchema = z.object({
+	projects: z.array(runtimeProjectSummarySchema),
+	board: runtimeAggregateBoardDataSchema,
+	generatedAt: z.number(),
+});
+export type RuntimeAggregateBoardSnapshot = z.infer<typeof runtimeAggregateBoardSnapshotSchema>;
+
 export const runtimeWorkspaceMetadataSchema = z.object({
 	homeGitSummary: runtimeGitSyncSummarySchema.nullable(),
 	homeGitStateVersion: z.number().int().nonnegative(),
@@ -425,6 +456,25 @@ export type RuntimeStateStreamTaskReadyForReviewMessage = z.infer<
 	typeof runtimeStateStreamTaskReadyForReviewMessageSchema
 >;
 
+export const runtimeStateStreamAggregateSnapshotMessageSchema = z.object({
+	type: z.literal("aggregate_snapshot"),
+	projects: z.array(runtimeProjectSummarySchema),
+	board: runtimeAggregateBoardDataSchema,
+	generatedAt: z.number(),
+});
+export type RuntimeStateStreamAggregateSnapshotMessage = z.infer<
+	typeof runtimeStateStreamAggregateSnapshotMessageSchema
+>;
+
+export const runtimeStateStreamAggregateBoardUpdatedMessageSchema = z.object({
+	type: z.literal("aggregate_board_updated"),
+	board: runtimeAggregateBoardDataSchema,
+	generatedAt: z.number(),
+});
+export type RuntimeStateStreamAggregateBoardUpdatedMessage = z.infer<
+	typeof runtimeStateStreamAggregateBoardUpdatedMessageSchema
+>;
+
 export const runtimeStateStreamErrorMessageSchema = z.object({
 	type: z.literal("error"),
 	message: z.string(),
@@ -438,6 +488,8 @@ export const runtimeStateStreamMessageSchema = z.discriminatedUnion("type", [
 	runtimeStateStreamProjectsMessageSchema,
 	runtimeStateStreamWorkspaceMetadataMessageSchema,
 	runtimeStateStreamTaskReadyForReviewMessageSchema,
+	runtimeStateStreamAggregateSnapshotMessageSchema,
+	runtimeStateStreamAggregateBoardUpdatedMessageSchema,
 	runtimeStateStreamErrorMessageSchema,
 ]);
 export type RuntimeStateStreamMessage = z.infer<typeof runtimeStateStreamMessageSchema>;
