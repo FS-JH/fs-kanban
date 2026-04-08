@@ -126,6 +126,19 @@ function cloneSummary(summary: RuntimeTaskSessionSummary): RuntimeTaskSessionSum
 	};
 }
 
+function normalizeStaleSessionSummary(summary: RuntimeTaskSessionSummary): RuntimeTaskSessionSummary {
+	if (!isActiveState(summary.state)) {
+		return cloneSummary(summary);
+	}
+	return {
+		...summary,
+		state: "interrupted",
+		reviewReason: "interrupted",
+		pid: null,
+		updatedAt: now(),
+	};
+}
+
 function updateSummary(entry: SessionEntry, patch: Partial<RuntimeTaskSessionSummary>): RuntimeTaskSessionSummary {
 	entry.summary = {
 		...entry.summary,
@@ -200,7 +213,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 	hydrateFromRecord(record: Record<string, RuntimeTaskSessionSummary>): void {
 		for (const [taskId, summary] of Object.entries(record)) {
 			this.entries.set(taskId, {
-				summary: cloneSummary(summary),
+				summary: normalizeStaleSessionSummary(summary),
 				active: null,
 				listenerIdCounter: 1,
 				listeners: new Map(),
@@ -619,20 +632,8 @@ export class TerminalSessionManager implements TerminalSessionService {
 			return cloneSummary(entry.summary);
 		}
 
-		const summary = updateSummary(entry, {
-			state: "idle",
-			agentId: null,
-			workspacePath: null,
-			pid: null,
-			startedAt: null,
-			lastOutputAt: null,
-			reviewReason: null,
-			exitCode: null,
-			lastHookAt: null,
-			latestHookActivity: null,
-			latestTurnCheckpoint: null,
-			previousTurnCheckpoint: null,
-		});
+		entry.summary = normalizeStaleSessionSummary(entry.summary);
+		const summary = cloneSummary(entry.summary);
 
 		for (const listener of entry.listeners.values()) {
 			listener.onState?.(cloneSummary(summary));

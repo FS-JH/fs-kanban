@@ -1177,7 +1177,7 @@ describe.sequential("runtime state stream integration", () => {
 		}
 	}, 45_000);
 
-	it("moves stale hook-review cards to trash on shutdown", async () => {
+	it("keeps stale hook-review cards in review on shutdown", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-stale-review-");
 		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-stale-review-");
 
@@ -1262,9 +1262,8 @@ describe.sequential("runtime state stream integration", () => {
 
 			const reviewCards = finalState.payload.board.columns.find((column) => column.id === "review")?.cards ?? [];
 			const trashCards = finalState.payload.board.columns.find((column) => column.id === "trash")?.cards ?? [];
-			expect(reviewCards.some((card) => card.id === taskId)).toBe(false);
-			expect(trashCards.some((card) => card.id === taskId)).toBe(true);
-			expect(trashCards[0]?.id).toBe(taskId);
+			expect(reviewCards.some((card) => card.id === taskId)).toBe(true);
+			expect(trashCards.some((card) => card.id === taskId)).toBe(false);
 			expect(trashCards.some((card) => card.id === existingTrashTaskId)).toBe(true);
 			expect(finalState.payload.sessions[taskId]?.state).toBe("interrupted");
 			expect(finalState.payload.sessions[taskId]?.reviewReason).toBe("interrupted");
@@ -1275,7 +1274,7 @@ describe.sequential("runtime state stream integration", () => {
 		}
 	}, 45_000);
 
-	it("moves stale completed review cards to trash on shutdown", async () => {
+	it("keeps stale completed review cards in review on shutdown", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-stale-exit-review-");
 		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-stale-exit-review-");
 
@@ -1371,8 +1370,8 @@ describe.sequential("runtime state stream integration", () => {
 
 			const reviewCards = finalState.payload.board.columns.find((column) => column.id === "review")?.cards ?? [];
 			const trashCards = finalState.payload.board.columns.find((column) => column.id === "trash")?.cards ?? [];
-			expect(reviewCards.some((card) => card.id === taskId)).toBe(false);
-			expect(trashCards.some((card) => card.id === taskId)).toBe(true);
+			expect(reviewCards.some((card) => card.id === taskId)).toBe(true);
+			expect(trashCards.some((card) => card.id === taskId)).toBe(false);
 			expect(finalState.payload.sessions[taskId]?.state).toBe("interrupted");
 			expect(finalState.payload.sessions[taskId]?.reviewReason).toBe("interrupted");
 			const workspaceInfo = await requestJson<RuntimeTaskWorkspaceInfoResponse>({
@@ -1386,7 +1385,7 @@ describe.sequential("runtime state stream integration", () => {
 				},
 			});
 			expect(workspaceInfo.status).toBe(200);
-			expect(workspaceInfo.payload.exists).toBe(false);
+			expect(workspaceInfo.payload.exists).toBe(true);
 		} finally {
 			await secondServer.stop();
 			cleanupProject();
@@ -1494,8 +1493,8 @@ describe.sequential("runtime state stream integration", () => {
 			const trashCards = finalState.payload.board.columns.find((column) => column.id === "trash")?.cards ?? [];
 			expect(reviewCards.some((card) => card.id === taskId)).toBe(true);
 			expect(trashCards.some((card) => card.id === taskId)).toBe(false);
-			expect(finalState.payload.sessions[taskId]?.state).toBe("awaiting_review");
-			expect(finalState.payload.sessions[taskId]?.reviewReason).toBe("hook");
+			expect(finalState.payload.sessions[taskId]?.state).toBe("interrupted");
+			expect(finalState.payload.sessions[taskId]?.reviewReason).toBe("interrupted");
 
 			const workspaceInfo = await requestJson<RuntimeTaskWorkspaceInfoResponse>({
 				baseUrl: `http://127.0.0.1:${secondPort}`,

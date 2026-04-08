@@ -69,20 +69,57 @@ describe("TerminalSessionManager", () => {
 		expect(typeof updated?.lastHookAt).toBe("number");
 	});
 
-
-	it("resets stale running sessions without active processes", () => {
+	it("hydrates persisted active sessions as interrupted", () => {
 		const manager = new TerminalSessionManager();
 		manager.hydrateFromRecord({
 			"task-1": createSummary({ state: "running" }),
 		});
 
+		const hydrated = manager.getSummary("task-1");
+
+		expect(hydrated?.state).toBe("interrupted");
+		expect(hydrated?.pid).toBeNull();
+		expect(hydrated?.agentId).toBe("claude");
+		expect(hydrated?.workspacePath).toBe("/tmp/worktree");
+		expect(hydrated?.reviewReason).toBe("interrupted");
+	});
+
+	it("recovers stale running sessions without active processes as interrupted", () => {
+		const manager = new TerminalSessionManager();
+		(
+			manager as unknown as {
+				entries: Map<
+					string,
+					{
+						summary: RuntimeTaskSessionSummary;
+						active: null;
+						listenerIdCounter: number;
+						listeners: Map<number, unknown>;
+						restartRequest: null;
+						suppressAutoRestartOnExit: boolean;
+						autoRestartTimestamps: number[];
+						pendingAutoRestart: null;
+					}
+				>;
+			}
+		).entries.set("task-1", {
+			summary: createSummary({ state: "running" }),
+			active: null,
+			listenerIdCounter: 1,
+			listeners: new Map(),
+			restartRequest: null,
+			suppressAutoRestartOnExit: false,
+			autoRestartTimestamps: [],
+			pendingAutoRestart: null,
+		});
+
 		const recovered = manager.recoverStaleSession("task-1");
 
-		expect(recovered?.state).toBe("idle");
+		expect(recovered?.state).toBe("interrupted");
 		expect(recovered?.pid).toBeNull();
-		expect(recovered?.agentId).toBeNull();
-		expect(recovered?.workspacePath).toBeNull();
-		expect(recovered?.reviewReason).toBeNull();
+		expect(recovered?.agentId).toBe("claude");
+		expect(recovered?.workspacePath).toBe("/tmp/worktree");
+		expect(recovered?.reviewReason).toBe("interrupted");
 	});
 
 	it("tracks only the latest two turn checkpoints", () => {
