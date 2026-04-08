@@ -1,7 +1,7 @@
 import { Draggable } from "@hello-pangea/dnd";
 import { buildTaskWorktreeDisplayPath } from "@runtime-task-worktree-path";
 import { AlertCircle, GitBranch, Play, RotateCcw, Trash2 } from "lucide-react";
-import type { MouseEvent } from "react";
+import type { CSSProperties, HTMLAttributes, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatToolCallLabel } from "@runtime-tool-call-display";
@@ -11,7 +11,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
-import type { BoardCard as BoardCardModel, BoardColumnId } from "@/types";
+import type { BoardCard as BoardCardModel, BoardColumnId, ReviewTaskWorkspaceSnapshot } from "@/types";
 import { getTaskAutoReviewCancelButtonLabel } from "@/types";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { useMeasure } from "@/utils/react-use";
@@ -201,6 +201,10 @@ export function BoardCard({
 	isDependencyTarget = false,
 	isDependencyLinking = false,
 	workspacePath,
+	projectLabel,
+	projectSubtitle,
+	reviewWorkspaceSnapshotOverride,
+	isDraggable = true,
 }: {
 	card: BoardCardModel;
 	index: number;
@@ -223,6 +227,10 @@ export function BoardCard({
 	isDependencyTarget?: boolean;
 	isDependencyLinking?: boolean;
 	workspacePath?: string | null;
+	projectLabel?: string | null;
+	projectSubtitle?: string | null;
+	reviewWorkspaceSnapshotOverride?: ReviewTaskWorkspaceSnapshot | null;
+	isDraggable?: boolean;
 }): React.ReactElement {
 	const [isHovered, setIsHovered] = useState(false);
 	const [titleContainerRef, titleRect] = useMeasure<HTMLDivElement>();
@@ -239,7 +247,8 @@ export function BoardCard({
 	const [sessionPreviewFont, setSessionPreviewFont] = useState(DEFAULT_TEXT_MEASURE_FONT);
 	const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
 	const [isSessionPreviewExpanded, setIsSessionPreviewExpanded] = useState(false);
-	const reviewWorkspaceSnapshot = useTaskWorkspaceSnapshotValue(card.id);
+	const storedReviewWorkspaceSnapshot = useTaskWorkspaceSnapshotValue(card.id);
+	const reviewWorkspaceSnapshot = reviewWorkspaceSnapshotOverride ?? storedReviewWorkspaceSnapshot;
 	const isTrashCard = columnId === "trash";
 	const isCardInteractive = !isTrashCard;
 	const titleWidth = titleRect.width > 0 ? titleRect.width : titleWidthFallback;
@@ -414,371 +423,399 @@ export function BoardCard({
 	const cancelAutomaticActionLabel =
 		!isTrashCard && card.autoReviewEnabled ? getTaskAutoReviewCancelButtonLabel(card.autoReviewMode) : null;
 
-	return (
-		<Draggable draggableId={card.id} index={index} isDragDisabled={false}>
-			{(provided, snapshot) => {
-				const isDragging = snapshot.isDragging;
-				const draggableContent = (
-					<div
-						ref={provided.innerRef}
-						{...provided.draggableProps}
-						{...provided.dragHandleProps}
-						className="kb-board-card-shell"
-						data-task-id={card.id}
-						data-column-id={columnId}
-						data-selected={selected}
-						onMouseDownCapture={(event) => {
-							if (!isCardInteractive) {
-								return;
-							}
-							if (isDependencyLinking) {
-								event.preventDefault();
-								event.stopPropagation();
-								return;
-							}
-							if (!event.metaKey && !event.ctrlKey) {
-								return;
-							}
-							const target = event.target as HTMLElement | null;
-							if (target?.closest("button, a, input, textarea, [contenteditable='true']")) {
-								return;
-							}
-							event.preventDefault();
-							event.stopPropagation();
-							onDependencyPointerDown?.(card.id, event);
-						}}
-						onClick={(event) => {
-							if (isDependencyLinking) {
-								event.preventDefault();
-								event.stopPropagation();
-								return;
-							}
-							if (event.metaKey || event.ctrlKey) {
-								return;
-							}
-							if (!snapshot.isDragging && onClick) {
-								onClick();
-							}
-						}}
-						style={{
-							...provided.draggableProps.style,
-							marginBottom: 6,
-							cursor: "grab",
-						}}
-						onMouseEnter={() => {
-							setIsHovered(true);
-							onDependencyPointerEnter?.(card.id);
-						}}
-						onMouseMove={() => {
-							if (!isDependencyLinking) {
-								return;
-							}
-							onDependencyPointerEnter?.(card.id);
-						}}
-						onMouseLeave={() => setIsHovered(false)}
-					>
-						<div
-							className={cn(
-								"rounded-md border border-border-bright bg-surface-2 p-2.5",
-								isCardInteractive && "cursor-pointer hover:bg-surface-3 hover:border-border-bright",
-								isDragging && "shadow-lg",
-								isHovered && isCardInteractive && "bg-surface-3 border-border-bright",
-								isDependencySource && "kb-board-card-dependency-source",
-								isDependencyTarget && "kb-board-card-dependency-target",
-							)}
-						>
-							<div className="flex items-center gap-2" style={{ minHeight: 24 }}>
-								{statusMarker ? <div className="inline-flex items-center">{statusMarker}</div> : null}
-								<div ref={titleContainerRef} className="flex-1 min-w-0">
-									<p
-										ref={titleRef}
-										className={cn(
-											"kb-line-clamp-1 m-0 font-medium text-sm",
-											isTrashCard && "line-through text-text-tertiary",
-										)}
-									>
-										{displayPromptSplit.title}
-									</p>
-								</div>
-								{columnId === "backlog" ? (
-									<Button
-										icon={<Play size={14} />}
-										variant="ghost"
-										size="sm"
-										aria-label="Start task"
-										onMouseDown={stopEvent}
-										onClick={(event) => {
-											stopEvent(event);
-											onStart?.(card.id);
-										}}
-									/>
-								) : columnId === "review" ? (
-									<Button
-										icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
-										variant="ghost"
-										size="sm"
-										disabled={isMoveToTrashLoading}
-										aria-label="Move task to trash"
-										onMouseDown={stopEvent}
-										onClick={(event) => {
-											stopEvent(event);
-											onMoveToTrash?.(card.id);
-										}}
-									/>
-								) : columnId === "trash" ? (
-									<Tooltip
-										side="bottom"
-										content={
-											<>
-												Restore session
-												<br />
-												in new worktree
-											</>
-										}
-									>
-										<Button
-											icon={<RotateCcw size={12} />}
-											variant="ghost"
-											size="sm"
-											aria-label="Restore task from trash"
-											onMouseDown={stopEvent}
-											onClick={(event) => {
-												stopEvent(event);
-												onRestoreFromTrash?.(card.id);
-											}}
-										/>
-									</Tooltip>
-								) : null}
-							</div>
-							{displayPromptSplit.description ? (
-								<div ref={descriptionContainerRef}>
-									<p
-										ref={descriptionRef}
-										className={cn(
-											"text-sm leading-[1.4]",
-											isTrashCard ? "text-text-tertiary" : "text-text-secondary",
-											!isDescriptionMeasured && !isDescriptionExpanded && "line-clamp-3",
-										)}
-										style={{
-											margin: "2px 0 0",
-										}}
-									>
-										{isDescriptionExpanded || !descriptionDisplay.isTruncated
-											? displayPromptSplit.description
-											: descriptionDisplay.text}
-										{descriptionDisplay.isTruncated ? (
-											isDescriptionExpanded ? (
-												<>
-													{" "}
-													<button
-														type="button"
-														className="inline cursor-pointer rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [color:inherit] [font:inherit]"
-														aria-expanded={isDescriptionExpanded}
-														aria-label="Collapse task description"
-														onMouseDown={stopEvent}
-														onClick={(event) => {
-															stopEvent(event);
-															setIsDescriptionExpanded(false);
-														}}
-													>
-														{DESCRIPTION_COLLAPSE_LABEL}
-													</button>
-												</>
-											) : (
-												<>
-													{"… "}
-													<button
-														type="button"
-														className="inline cursor-pointer rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [color:inherit] [font:inherit]"
-														aria-expanded={isDescriptionExpanded}
-														aria-label="Expand task description"
-														onMouseDown={stopEvent}
-														onClick={(event) => {
-															stopEvent(event);
-															setIsDescriptionExpanded(true);
-														}}
-													>
-														{DESCRIPTION_EXPAND_LABEL}
-													</button>
-												</>
-											)
-										) : null}
-									</p>
-								</div>
-							) : null}
-							{sessionActivity ? (
-								<div
-									className="flex gap-1.5 items-start mt-[6px]"
-									style={{
-										color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
-									}}
-								>
-									<span
-										className="inline-block shrink-0 rounded-full"
-										style={{
-											width: 6,
-											height: 6,
-											backgroundColor: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : sessionActivity.dotColor,
-											marginTop: 4,
-										}}
-									/>
-									<div ref={sessionPreviewContainerRef} className="min-w-0 flex-1">
-										<p
-											ref={sessionPreviewRef}
-											className={cn("m-0 font-mono", !isSessionPreviewMeasured && !isSessionPreviewExpanded && "line-clamp-6")}
-											style={{
-												fontSize: 12,
-												whiteSpace: "normal",
-												overflowWrap: "anywhere",
-											}}
-										>
-											{isSessionPreviewExpanded || !sessionPreviewDisplay.isTruncated
-											? sessionActivity.text
-											: sessionPreviewDisplay.text}
-										{sessionPreviewDisplay.isTruncated ? (
-												isSessionPreviewExpanded ? (
-													<>
-														{" "}
-														<button
-															type="button"
-															className="inline cursor-pointer rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [color:inherit] [font:inherit]"
-															aria-expanded={isSessionPreviewExpanded}
-															aria-label="Collapse task agent preview"
-															onMouseDown={stopEvent}
-															onClick={(event) => {
-																stopEvent(event);
-																setIsSessionPreviewExpanded(false);
-															}}
-														>
-															{DESCRIPTION_COLLAPSE_LABEL}
-														</button>
-													</>
-												) : (
-													<>
-														{"… "}
-														<button
-															type="button"
-															className="inline cursor-pointer rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [color:inherit] [font:inherit]"
-															aria-expanded={isSessionPreviewExpanded}
-															aria-label="Expand task agent preview"
-															onMouseDown={stopEvent}
-															onClick={(event) => {
-																stopEvent(event);
-																setIsSessionPreviewExpanded(true);
-															}}
-														>
-															{DESCRIPTION_EXPAND_LABEL}
-														</button>
-													</>
-												)
-											) : null}
-										</p>
-									</div>
-								</div>
-							) : null}
-							{showWorkspaceStatus && reviewWorkspacePath ? (
-								<p
-									className="font-mono"
-									style={{
-										margin: "4px 0 0",
-										fontSize: 12,
-										lineHeight: 1.4,
-										whiteSpace: "normal",
-										overflowWrap: "anywhere",
-										color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
-									}}
-								>
-									{isTrashCard ? (
-										<span
-											style={{
-												color: SESSION_ACTIVITY_COLOR.muted,
-												textDecoration: "line-through",
-											}}
-										>
-											{reviewWorkspacePath}
-										</span>
-									) : reviewWorkspaceSnapshot ? (
-										<>
-											<span style={{ color: SESSION_ACTIVITY_COLOR.secondary }}>{reviewWorkspacePath}</span>
-											<GitBranch
-												size={10}
-												style={{
-													display: "inline",
-													color: SESSION_ACTIVITY_COLOR.secondary,
-													margin: "0px 4px 2px",
-													verticalAlign: "middle",
-												}}
-											/>
-											<span style={{ color: SESSION_ACTIVITY_COLOR.secondary }}>{reviewRefLabel}</span>
-											{reviewChangeSummary ? (
-												<>
-													<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}> (</span>
-													<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>
-														{reviewChangeSummary.filesLabel}
-													</span>
-													<span className="text-status-green"> +{reviewChangeSummary.additions}</span>
-													<span className="text-status-red"> -{reviewChangeSummary.deletions}</span>
-													<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>)</span>
-												</>
-											) : null}
-										</>
-									) : null}
-								</p>
-							) : null}
-							{showReviewGitActions ? (
-								<div className="flex gap-1.5 mt-1.5">
-									<Button
-										variant="primary"
-										size="sm"
-										icon={isCommitLoading ? <Spinner size={12} /> : undefined}
-										disabled={isAnyGitActionLoading}
-										style={{ flex: "1 1 0" }}
-										onMouseDown={stopEvent}
-										onClick={(event) => {
-											stopEvent(event);
-											onCommit?.(card.id);
-										}}
-									>
-										Commit
-									</Button>
-									<Button
-										variant="primary"
-										size="sm"
-										icon={isOpenPrLoading ? <Spinner size={12} /> : undefined}
-										disabled={isAnyGitActionLoading}
-										style={{ flex: "1 1 0" }}
-										onMouseDown={stopEvent}
-										onClick={(event) => {
-											stopEvent(event);
-											onOpenPr?.(card.id);
-										}}
-									>
-										Open PR
-									</Button>
-								</div>
-							) : null}
-							{cancelAutomaticActionLabel && onCancelAutomaticAction ? (
+	const renderCardShell = (input: {
+		dragHandleProps?: HTMLAttributes<HTMLElement> | null;
+		draggableProps?: HTMLAttributes<HTMLElement> & { style?: CSSProperties };
+		innerRef?: (element: HTMLElement | null) => void;
+		isDragging: boolean;
+	}) => {
+		const { dragHandleProps, draggableProps, innerRef, isDragging } = input;
+		const draggableContent = (
+			<div
+				ref={innerRef}
+				{...draggableProps}
+				{...dragHandleProps}
+				className="kb-board-card-shell"
+				data-task-id={card.id}
+				data-column-id={columnId}
+				data-selected={selected}
+				onMouseDownCapture={(event) => {
+					if (!isCardInteractive) {
+						return;
+					}
+					if (isDependencyLinking) {
+						event.preventDefault();
+						event.stopPropagation();
+						return;
+					}
+					if (!event.metaKey && !event.ctrlKey) {
+						return;
+					}
+					const target = event.target as HTMLElement | null;
+					if (target?.closest("button, a, input, textarea, [contenteditable='true']")) {
+						return;
+					}
+					event.preventDefault();
+					event.stopPropagation();
+					onDependencyPointerDown?.(card.id, event);
+				}}
+				onClick={(event) => {
+					if (isDependencyLinking) {
+						event.preventDefault();
+						event.stopPropagation();
+						return;
+					}
+					if (event.metaKey || event.ctrlKey) {
+						return;
+					}
+					if (!isDragging && onClick) {
+						onClick();
+					}
+				}}
+				style={{
+					...draggableProps?.style,
+					marginBottom: 6,
+					cursor: isDraggable ? "grab" : isCardInteractive ? "pointer" : "default",
+				}}
+				onMouseEnter={() => {
+					setIsHovered(true);
+					onDependencyPointerEnter?.(card.id);
+				}}
+				onMouseMove={() => {
+					if (!isDependencyLinking) {
+						return;
+					}
+					onDependencyPointerEnter?.(card.id);
+				}}
+				onMouseLeave={() => setIsHovered(false)}
+			>
+				<div
+					className={cn(
+						"rounded-md border border-border-bright bg-surface-2 p-2.5",
+						isCardInteractive && "cursor-pointer hover:bg-surface-3 hover:border-border-bright",
+						isDragging && "shadow-lg",
+						isHovered && isCardInteractive && "bg-surface-3 border-border-bright",
+						isDependencySource && "kb-board-card-dependency-source",
+						isDependencyTarget && "kb-board-card-dependency-target",
+					)}
+				>
+					{projectLabel ? (
+						<div className="mb-2 flex items-center gap-2 text-[11px] text-text-secondary">
+							<span className="rounded-full border border-border bg-surface-1 px-2 py-0.5 font-medium text-text-primary">
+								{projectLabel}
+							</span>
+							{projectSubtitle ? <span className="truncate font-mono">{projectSubtitle}</span> : null}
+						</div>
+					) : null}
+					<div className="flex items-center gap-2" style={{ minHeight: 24 }}>
+						{statusMarker ? <div className="inline-flex items-center">{statusMarker}</div> : null}
+						<div ref={titleContainerRef} className="flex-1 min-w-0">
+							<p
+								ref={titleRef}
+								className={cn(
+									"kb-line-clamp-1 m-0 font-medium text-sm",
+									isTrashCard && "line-through text-text-tertiary",
+								)}
+							>
+								{displayPromptSplit.title}
+							</p>
+						</div>
+						{columnId === "backlog" ? (
+							<Button
+								icon={<Play size={14} />}
+								variant="ghost"
+								size="sm"
+								aria-label="Start task"
+								onMouseDown={stopEvent}
+								onClick={(event) => {
+									stopEvent(event);
+									onStart?.(card.id);
+								}}
+							/>
+						) : columnId === "review" ? (
+							<Button
+								icon={isMoveToTrashLoading ? <Spinner size={13} /> : <Trash2 size={13} />}
+								variant="ghost"
+								size="sm"
+								disabled={isMoveToTrashLoading}
+								aria-label="Move task to trash"
+								onMouseDown={stopEvent}
+								onClick={(event) => {
+									stopEvent(event);
+									onMoveToTrash?.(card.id);
+								}}
+							/>
+						) : columnId === "trash" ? (
+							<Tooltip
+								side="bottom"
+								content={
+									<>
+										Restore session
+										<br />
+										in new worktree
+									</>
+								}
+							>
 								<Button
+									icon={<RotateCcw size={12} />}
+									variant="ghost"
 									size="sm"
-									fill
-									style={{ marginTop: 12 }}
+									aria-label="Restore task from trash"
 									onMouseDown={stopEvent}
 									onClick={(event) => {
 										stopEvent(event);
-										onCancelAutomaticAction(card.id);
+										onRestoreFromTrash?.(card.id);
+									}}
+								/>
+							</Tooltip>
+						) : null}
+					</div>
+					{displayPromptSplit.description ? (
+						<div ref={descriptionContainerRef}>
+							<p
+								ref={descriptionRef}
+								className={cn(
+									"text-sm leading-[1.4]",
+									isTrashCard ? "text-text-tertiary" : "text-text-secondary",
+									!isDescriptionMeasured && !isDescriptionExpanded && "line-clamp-3",
+								)}
+								style={{
+									margin: "2px 0 0",
+								}}
+							>
+								{isDescriptionExpanded || !descriptionDisplay.isTruncated
+									? displayPromptSplit.description
+									: descriptionDisplay.text}
+								{descriptionDisplay.isTruncated ? (
+									isDescriptionExpanded ? (
+										<>
+											{" "}
+											<button
+												type="button"
+												className="inline cursor-pointer rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [color:inherit] [font:inherit]"
+												aria-expanded={isDescriptionExpanded}
+												aria-label="Collapse task description"
+												onMouseDown={stopEvent}
+												onClick={(event) => {
+													stopEvent(event);
+													setIsDescriptionExpanded(false);
+												}}
+											>
+												{DESCRIPTION_COLLAPSE_LABEL}
+											</button>
+										</>
+									) : (
+										<>
+											{"… "}
+											<button
+												type="button"
+												className="inline cursor-pointer rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [color:inherit] [font:inherit]"
+												aria-expanded={isDescriptionExpanded}
+												aria-label="Expand task description"
+												onMouseDown={stopEvent}
+												onClick={(event) => {
+													stopEvent(event);
+													setIsDescriptionExpanded(true);
+												}}
+											>
+												{DESCRIPTION_EXPAND_LABEL}
+											</button>
+										</>
+									)
+								) : null}
+							</p>
+						</div>
+					) : null}
+					{sessionActivity ? (
+						<div
+							className="flex gap-1.5 items-start mt-[6px]"
+							style={{
+								color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
+							}}
+						>
+							<span
+								className="inline-block shrink-0 rounded-full"
+								style={{
+									width: 6,
+									height: 6,
+									backgroundColor: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : sessionActivity.dotColor,
+									marginTop: 4,
+								}}
+							/>
+							<div ref={sessionPreviewContainerRef} className="min-w-0 flex-1">
+								<p
+									ref={sessionPreviewRef}
+									className={cn("m-0 font-mono", !isSessionPreviewMeasured && !isSessionPreviewExpanded && "line-clamp-6")}
+									style={{
+										fontSize: 12,
+										whiteSpace: "normal",
+										overflowWrap: "anywhere",
 									}}
 								>
-									{cancelAutomaticActionLabel}
-								</Button>
-							) : null}
+									{isSessionPreviewExpanded || !sessionPreviewDisplay.isTruncated
+										? sessionActivity.text
+										: sessionPreviewDisplay.text}
+									{sessionPreviewDisplay.isTruncated ? (
+										isSessionPreviewExpanded ? (
+											<>
+												{" "}
+												<button
+													type="button"
+													className="inline cursor-pointer rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [color:inherit] [font:inherit]"
+													aria-expanded={isSessionPreviewExpanded}
+													aria-label="Collapse task agent preview"
+													onMouseDown={stopEvent}
+													onClick={(event) => {
+														stopEvent(event);
+														setIsSessionPreviewExpanded(false);
+													}}
+												>
+													{DESCRIPTION_COLLAPSE_LABEL}
+												</button>
+											</>
+										) : (
+											<>
+												{"… "}
+												<button
+													type="button"
+													className="inline cursor-pointer rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [color:inherit] [font:inherit]"
+													aria-expanded={isSessionPreviewExpanded}
+													aria-label="Expand task agent preview"
+													onMouseDown={stopEvent}
+													onClick={(event) => {
+														stopEvent(event);
+														setIsSessionPreviewExpanded(true);
+													}}
+												>
+													{DESCRIPTION_EXPAND_LABEL}
+												</button>
+											</>
+										)
+									) : null}
+								</p>
+							</div>
 						</div>
-					</div>
-				);
+					) : null}
+					{showWorkspaceStatus && reviewWorkspacePath ? (
+						<p
+							className="font-mono"
+							style={{
+								margin: "4px 0 0",
+								fontSize: 12,
+								lineHeight: 1.4,
+								whiteSpace: "normal",
+								overflowWrap: "anywhere",
+								color: isTrashCard ? SESSION_ACTIVITY_COLOR.muted : undefined,
+							}}
+						>
+							{isTrashCard ? (
+								<span
+									style={{
+										color: SESSION_ACTIVITY_COLOR.muted,
+										textDecoration: "line-through",
+									}}
+								>
+									{reviewWorkspacePath}
+								</span>
+							) : reviewWorkspaceSnapshot ? (
+								<>
+									<span style={{ color: SESSION_ACTIVITY_COLOR.secondary }}>{reviewWorkspacePath}</span>
+									<GitBranch
+										size={10}
+										style={{
+											display: "inline",
+											color: SESSION_ACTIVITY_COLOR.secondary,
+											margin: "0px 4px 2px",
+											verticalAlign: "middle",
+										}}
+									/>
+									<span style={{ color: SESSION_ACTIVITY_COLOR.secondary }}>{reviewRefLabel}</span>
+									{reviewChangeSummary ? (
+										<>
+											<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}> (</span>
+											<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>
+												{reviewChangeSummary.filesLabel}
+											</span>
+											<span className="text-status-green"> +{reviewChangeSummary.additions}</span>
+											<span className="text-status-red"> -{reviewChangeSummary.deletions}</span>
+											<span style={{ color: SESSION_ACTIVITY_COLOR.muted }}>)</span>
+										</>
+									) : null}
+								</>
+							) : null}
+						</p>
+					) : null}
+					{showReviewGitActions ? (
+						<div className="flex gap-1.5 mt-1.5">
+							<Button
+								variant="primary"
+								size="sm"
+								icon={isCommitLoading ? <Spinner size={12} /> : undefined}
+								disabled={isAnyGitActionLoading}
+								style={{ flex: "1 1 0" }}
+								onMouseDown={stopEvent}
+								onClick={(event) => {
+									stopEvent(event);
+									onCommit?.(card.id);
+								}}
+							>
+								Commit
+							</Button>
+							<Button
+								variant="primary"
+								size="sm"
+								icon={isOpenPrLoading ? <Spinner size={12} /> : undefined}
+								disabled={isAnyGitActionLoading}
+								style={{ flex: "1 1 0" }}
+								onMouseDown={stopEvent}
+								onClick={(event) => {
+									stopEvent(event);
+									onOpenPr?.(card.id);
+								}}
+							>
+								Open PR
+							</Button>
+						</div>
+					) : null}
+					{cancelAutomaticActionLabel && onCancelAutomaticAction ? (
+						<Button
+							size="sm"
+							fill
+							style={{ marginTop: 12 }}
+							onMouseDown={stopEvent}
+							onClick={(event) => {
+								stopEvent(event);
+								onCancelAutomaticAction(card.id);
+							}}
+						>
+							{cancelAutomaticActionLabel}
+						</Button>
+					) : null}
+				</div>
+			</div>
+		);
 
-				if (isDragging && typeof document !== "undefined") {
-					return createPortal(draggableContent, document.body);
-				}
-				return draggableContent;
+		if (isDragging && typeof document !== "undefined") {
+			return createPortal(draggableContent, document.body);
+		}
+		return draggableContent;
+	};
+
+	if (!isDraggable) {
+		return renderCardShell({
+			isDragging: false,
+		});
+	}
+
+	return (
+		<Draggable draggableId={card.id} index={index} isDragDisabled={false}>
+			{(provided, snapshot) => {
+				return renderCardShell({
+					innerRef: provided.innerRef,
+					draggableProps: provided.draggableProps,
+					dragHandleProps: provided.dragHandleProps,
+					isDragging: snapshot.isDragging,
+				});
 			}}
 		</Draggable>
 	);

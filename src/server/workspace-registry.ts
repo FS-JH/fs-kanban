@@ -1,9 +1,12 @@
 import { toGlobalRuntimeConfigState, type RuntimeConfigState } from "../config/runtime-config.js";
 import type {
+	RuntimeAggregateBoardData,
+	RuntimeAggregateBoardCard,
 	RuntimeBoardColumnId,
 	RuntimeBoardData,
 	RuntimeProjectSummary,
 	RuntimeProjectTaskCounts,
+	RuntimeTaskWorkspaceMetadata,
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract.js";
 import {
@@ -15,6 +18,8 @@ import {
 	removeWorkspaceStateFiles,
 } from "../state/workspace-state.js";
 import { TerminalSessionManager } from "../terminal/session-manager.js";
+import { getGitSyncSummary, probeGitWorkspaceState } from "../workspace/git-sync.js";
+import { getTaskWorkspacePathInfo } from "../workspace/task-worktree.js";
 
 export interface WorkspaceRegistryScope {
 	workspaceId: string;
@@ -76,6 +81,10 @@ export interface WorkspaceRegistry {
 	buildProjectsPayload: (preferredCurrentProjectId: string | null) => Promise<{
 		currentProjectId: string | null;
 		projects: RuntimeProjectSummary[];
+	}>;
+	buildAggregateBoardSnapshot: () => Promise<{
+		board: RuntimeAggregateBoardData;
+		generatedAt: number;
 	}>;
 	resolveWorkspaceForStream: (
 		requestedWorkspaceId: string | null,
@@ -180,6 +189,65 @@ function toProjectSummary(project: {
 		name,
 		taskCounts: project.taskCounts,
 	};
+}
+
+async function buildTaskWorkspaceMetadata(
+	repoPath: string,
+	card: RuntimeWorkspaceStateResponse["board"]["columns"][number]["cards"][number],
+): Promise<RuntimeTaskWorkspaceMetadata> {
+	const pathInfo = await getTaskWorkspacePathInfo({
+		cwd: repoPath,
+		taskId: card.id,
+		baseRef: card.baseRef,
+	});
+
+	if (!pathInfo.exists) {
+		return {
+			taskId: pathInfo.taskId,
+			path: pathInfo.path,
+			exists: false,
+			baseRef: pathInfo.baseRef,
+			branch: null,
+			isDetached: false,
+			headCommit: null,
+			changedFiles: null,
+			additions: null,
+			deletions: null,
+			stateVersion: Date.now(),
+		};
+	}
+
+	try {
+		const probe = await probeGitWorkspaceState(pathInfo.path);
+		const summary = await getGitSyncSummary(pathInfo.path, { probe });
+		return {
+			taskId: pathInfo.taskId,
+			path: pathInfo.path,
+			exists: true,
+			baseRef: pathInfo.baseRef,
+			branch: probe.currentBranch,
+			isDetached: probe.headCommit !== null && probe.currentBranch === null,
+			headCommit: probe.headCommit,
+			changedFiles: summary.changedFiles,
+			additions: summary.additions,
+			deletions: summary.deletions,
+			stateVersion: Date.now(),
+		};
+	} catch {
+		return {
+			taskId: pathInfo.taskId,
+			path: pathInfo.path,
+			exists: true,
+			baseRef: pathInfo.baseRef,
+			branch: null,
+			isDetached: false,
+			headCommit: null,
+			changedFiles: null,
+			additions: null,
+			deletions: null,
+			stateVersion: Date.now(),
+		};
+	}
 }
 
 export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDependencies): Promise<WorkspaceRegistry> {
@@ -352,6 +420,91 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 		};
 	};
 
+	const buildAggregateBoardSnapshot = async (): Promise<{
+		board: RuntimeAggregateBoardData;
+		generatedAt: number;
+	}> => {
+		const projects = await listWorkspaceIndexEntries();
+		const aggregateColumns: RuntimeAggregateBoardData["columns"] = [
+			{ id: "in_progress", title: "In Progress", cards: [] },
+			{ id: "review", title: "Review", cards: [] },
+		];
+
+		for (const project of projects) {
+			let workspaceState: RuntimeWorkspaceStateResponse;
+			try {
+				workspaceState = await loadWorkspaceState(project.repoPath);
+			} catch {
+				continue;
+			}
+
+			const terminalManager = getTerminalManagerForWorkspace(project.workspaceId);
+			const sessions: RuntimeWorkspaceStateResponse["sessions"] = {
+				...workspaceState.sessions,
+			};
+			if (terminalManager) {
+				for (const summary of terminalManager.listSummaries()) {
+					sessions[summary.taskId] = summary;
+				}
+			}
+
+			const projectName = toProjectSummary({
+				workspaceId: project.workspaceId,
+				repoPath: project.repoPath,
+				taskCounts: createEmptyProjectTaskCounts(),
+			}).name;
+
+			for (const column of workspaceState.board.columns) {
+				if (column.id !== "in_progress" && column.id !== "review") {
+					continue;
+				}
+				for (const card of column.cards) {
+					const session = sessions[card.id] ?? null;
+					if (session?.state === "interrupted") {
+						continue;
+					}
+					const effectiveColumnId =
+						column.id === "in_progress" && session?.state === "awaiting_review" ? "review" : column.id;
+					const taskWorkspace = await buildTaskWorkspaceMetadata(project.repoPath, card);
+					const aggregateCard: RuntimeAggregateBoardCard = {
+						key: `${project.workspaceId}:${card.id}`,
+						workspaceId: project.workspaceId,
+						projectName,
+						projectPath: project.repoPath,
+						columnId: effectiveColumnId,
+						card,
+						session,
+						taskWorkspace,
+					};
+					const targetColumn = aggregateColumns.find((candidate) => candidate.id === effectiveColumnId);
+					targetColumn?.cards.push(aggregateCard);
+				}
+			}
+		}
+
+		for (const column of aggregateColumns) {
+			column.cards.sort((left, right) => {
+				const leftUpdatedAt = left.session?.updatedAt ?? left.card.updatedAt;
+				const rightUpdatedAt = right.session?.updatedAt ?? right.card.updatedAt;
+				if (leftUpdatedAt !== rightUpdatedAt) {
+					return rightUpdatedAt - leftUpdatedAt;
+				}
+				const projectNameComparison = left.projectName.localeCompare(right.projectName);
+				if (projectNameComparison !== 0) {
+					return projectNameComparison;
+				}
+				return left.card.id.localeCompare(right.card.id);
+			});
+		}
+
+		return {
+			board: {
+				columns: aggregateColumns,
+			},
+			generatedAt: Date.now(),
+		};
+	};
+
 	const resolveWorkspaceForStream = async (
 		requestedWorkspaceId: string | null,
 		options?: {
@@ -464,6 +617,7 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 		createProjectSummary: toProjectSummary,
 		buildWorkspaceStateSnapshot,
 		buildProjectsPayload,
+		buildAggregateBoardSnapshot,
 		resolveWorkspaceForStream,
 		listManagedWorkspaces: () => {
 			return Array.from(terminalManagersByWorkspaceId.entries()).map(([workspaceId, terminalManager]) => ({

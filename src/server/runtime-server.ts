@@ -268,7 +268,8 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 			}
 			(request as IncomingMessage & { __kanbanUpgradeHandled?: boolean }).__kanbanUpgradeHandled = true;
 			const requestedWorkspaceId = requestUrl.searchParams.get("workspaceId")?.trim() || null;
-			deps.runtimeStateHub.handleUpgrade(request, socket, head, { requestedWorkspaceId });
+			const isAggregateView = requestUrl.searchParams.get("view")?.trim() === "all-projects";
+			deps.runtimeStateHub.handleUpgrade(request, socket, head, { requestedWorkspaceId, isAggregateView });
 		});
 	};
 	for (const server of servers) {

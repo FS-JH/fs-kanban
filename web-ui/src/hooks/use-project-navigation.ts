@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { notifyError, showAppToast } from "@/components/app-toaster";
-import { buildProjectPathname, parseProjectIdFromPathname } from "@/hooks/app-utils";
+import {
+	buildAllProjectsPathname,
+	buildProjectPathname,
+	parseNavigationTargetFromPathname,
+} from "@/hooks/app-utils";
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import { useRuntimeStateStream } from "@/runtime/use-runtime-state-stream";
 import { useWindowEvent } from "@/utils/react-use";
@@ -51,6 +55,7 @@ interface UseProjectNavigationInput {
 }
 
 export interface UseProjectNavigationResult {
+	isAggregateView: boolean;
 	requestedProjectId: string | null;
 	navigationCurrentProjectId: string | null;
 	removingProjectId: string | null;
@@ -67,6 +72,7 @@ export interface UseProjectNavigationResult {
 	hasNoProjects: boolean;
 	isProjectSwitching: boolean;
 	handleSelectProject: (projectId: string) => void;
+	handleSelectAllProjects: () => void;
 	handleAddProject: () => Promise<void>;
 	handleConfirmInitializeGitProject: () => Promise<void>;
 	handleCancelInitializeGitProject: () => void;
@@ -75,16 +81,25 @@ export interface UseProjectNavigationResult {
 }
 
 export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigationInput): UseProjectNavigationResult {
-	const [requestedProjectId, setRequestedProjectId] = useState<string | null>(() => {
+	const [routeState, setRouteState] = useState(() => {
 		if (typeof window === "undefined") {
-			return null;
+			return {
+				isAggregateView: false,
+				requestedProjectId: null,
+			};
 		}
-		return parseProjectIdFromPathname(window.location.pathname);
+		const target = parseNavigationTargetFromPathname(window.location.pathname);
+		return {
+			isAggregateView: target.kind === "all-projects",
+			requestedProjectId: target.kind === "project" ? target.projectId : null,
+		};
 	});
 	const [pendingAddedProjectId, setPendingAddedProjectId] = useState<string | null>(null);
 	const [removingProjectId, setRemovingProjectId] = useState<string | null>(null);
 	const [pendingGitInitializationPath, setPendingGitInitializationPath] = useState<string | null>(null);
 	const [isInitializingGitProject, setIsInitializingGitProject] = useState(false);
+	const requestedProjectId = routeState.requestedProjectId;
+	const isAggregateView = routeState.isAggregateView;
 
 	const {
 		currentProjectId,
@@ -98,19 +113,31 @@ export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigat
 	} = useRuntimeStateStream(requestedProjectId);
 
 	const hasNoProjects = hasReceivedSnapshot && projects.length === 0 && currentProjectId === null;
-	const isProjectSwitching = requestedProjectId !== null && requestedProjectId !== currentProjectId && !hasNoProjects;
-	const navigationCurrentProjectId = requestedProjectId ?? currentProjectId;
+	const isProjectSwitching =
+		!isAggregateView && requestedProjectId !== null && requestedProjectId !== currentProjectId && !hasNoProjects;
+	const navigationCurrentProjectId = isAggregateView ? null : requestedProjectId ?? currentProjectId;
 
 	const handleSelectProject = useCallback(
 		(projectId: string) => {
-			if (!projectId || projectId === currentProjectId) {
+			if (!projectId || (!isAggregateView && projectId === currentProjectId)) {
 				return;
 			}
 			onProjectSwitchStart();
-			setRequestedProjectId(projectId);
+			setRouteState({
+				isAggregateView: false,
+				requestedProjectId: projectId,
+			});
 		},
-		[currentProjectId, onProjectSwitchStart],
+		[currentProjectId, isAggregateView, onProjectSwitchStart],
 	);
+
+	const handleSelectAllProjects = useCallback(() => {
+		onProjectSwitchStart();
+		setRouteState({
+			isAggregateView: true,
+			requestedProjectId: null,
+		});
+	}, [onProjectSwitchStart]);
 
 	const addProjectByPath = useCallback(
 		async (path: string, initializeGit = false) => {
@@ -213,7 +240,10 @@ export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigat
 				}
 				if (currentProjectId === projectId) {
 					onProjectSwitchStart();
-					setRequestedProjectId(null);
+					setRouteState((current) => ({
+						...current,
+						requestedProjectId: null,
+					}));
 				}
 				return true;
 			} catch (error) {
@@ -231,13 +261,25 @@ export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigat
 		if (typeof window === "undefined") {
 			return;
 		}
-		const nextProjectId = parseProjectIdFromPathname(window.location.pathname);
-		setRequestedProjectId(nextProjectId);
+		const target = parseNavigationTargetFromPathname(window.location.pathname);
+		setRouteState({
+			isAggregateView: target.kind === "all-projects",
+			requestedProjectId: target.kind === "project" ? target.projectId : null,
+		});
 	}, []);
 	useWindowEvent("popstate", handlePopState);
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
+			return;
+		}
+		if (isAggregateView) {
+			const nextUrl = new URL(window.location.href);
+			const nextPathname = buildAllProjectsPathname();
+			if (nextUrl.pathname === nextPathname) {
+				return;
+			}
+			window.history.replaceState({}, "", `${nextPathname}${nextUrl.search}${nextUrl.hash}`);
 			return;
 		}
 		if (!currentProjectId) {
@@ -249,7 +291,7 @@ export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigat
 			return;
 		}
 		window.history.replaceState({}, "", `${nextPathname}${nextUrl.search}${nextUrl.hash}`);
-	}, [currentProjectId]);
+	}, [currentProjectId, isAggregateView]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
@@ -262,7 +304,10 @@ export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigat
 		if (nextUrl.pathname !== "/") {
 			window.history.replaceState({}, "", `/${nextUrl.search}${nextUrl.hash}`);
 		}
-		setRequestedProjectId(null);
+		setRouteState({
+			isAggregateView: false,
+			requestedProjectId: null,
+		});
 	}, [hasNoProjects, requestedProjectId]);
 
 	useEffect(() => {
@@ -287,7 +332,10 @@ export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigat
 		if (requestedStillExists) {
 			return;
 		}
-		setRequestedProjectId(currentProjectId);
+		setRouteState((current) => ({
+			...current,
+			requestedProjectId: currentProjectId,
+		}));
 	}, [currentProjectId, pendingAddedProjectId, projects, requestedProjectId]);
 
 	const resetProjectNavigationState = useCallback(() => {
@@ -297,6 +345,7 @@ export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigat
 	}, []);
 
 	return {
+		isAggregateView,
 		requestedProjectId,
 		navigationCurrentProjectId,
 		removingProjectId,
@@ -313,6 +362,7 @@ export function useProjectNavigation({ onProjectSwitchStart }: UseProjectNavigat
 		hasNoProjects,
 		isProjectSwitching,
 		handleSelectProject,
+		handleSelectAllProjects,
 		handleAddProject,
 		handleConfirmInitializeGitProject,
 		handleCancelInitializeGitProject,
