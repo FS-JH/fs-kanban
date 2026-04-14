@@ -18,6 +18,7 @@ import type {
 	RuntimeProjectRemoveResponse,
 	RuntimeProjectsResponse,
 	RuntimeShellSessionStartResponse,
+	RuntimeStateStreamAggregateSnapshotMessage,
 	RuntimeStateStreamMessage,
 	RuntimeStateStreamProjectsMessage,
 	RuntimeStateStreamSnapshotMessage,
@@ -1269,6 +1270,83 @@ describe.sequential("runtime state stream integration", () => {
 			expect(finalState.payload.sessions[taskId]?.reviewReason).toBe("interrupted");
 		} finally {
 			await secondServer.stop();
+			cleanupProject();
+			cleanupHome();
+		}
+	}, 45_000);
+
+	it("includes interrupted review cards in the aggregate snapshot", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-aggregate-interrupted-");
+		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-aggregate-interrupted-");
+
+		mkdirSync(projectPath, { recursive: true });
+		initGitRepository(projectPath);
+
+		const taskId = "aggregate-interrupted-review-task";
+		const taskTitle = "Aggregate Interrupted Review Task";
+		const now = Date.now();
+
+		const port = await getAvailablePort();
+		const server = await startKanbanServer({
+			cwd: projectPath,
+			homeDir: tempHome,
+			port,
+		});
+
+		let stream: RuntimeStreamClient | null = null;
+
+		try {
+			const runtimeUrl = new URL(server.runtimeUrl);
+			const workspaceId = decodeURIComponent(runtimeUrl.pathname.slice(1));
+			expect(workspaceId).not.toBe("");
+
+			const currentState = await requestJson<RuntimeWorkspaceStateResponse>({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "workspace.getState",
+				type: "query",
+				workspaceId,
+			});
+			expect(currentState.status).toBe(200);
+
+			const seedResponse = await requestJson<RuntimeWorkspaceStateResponse>({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "workspace.saveState",
+				type: "mutation",
+				workspaceId,
+				payload: {
+					board: createReviewBoard(taskId, taskTitle),
+					sessions: {
+						[taskId]: {
+							taskId,
+							state: "interrupted",
+							agentId: "codex",
+							workspacePath: projectPath,
+							pid: null,
+							startedAt: now - 2_000,
+							updatedAt: now,
+							lastOutputAt: now,
+							reviewReason: "interrupted",
+							exitCode: null,
+							lastHookAt: null,
+							latestHookActivity: null,
+						},
+					},
+					expectedRevision: currentState.payload.revision,
+				},
+			});
+			expect(seedResponse.status).toBe(200);
+
+			stream = await connectRuntimeStream(`ws://127.0.0.1:${port}/api/runtime/ws?view=all-projects`);
+			const snapshot = (await stream.waitForMessage(
+				(message): message is RuntimeStateStreamAggregateSnapshotMessage => message.type === "aggregate_snapshot",
+			)) as RuntimeStateStreamAggregateSnapshotMessage;
+			const reviewCards = snapshot.board.columns.find((column) => column.id === "review")?.cards ?? [];
+			expect(reviewCards.some((card) => card.card.id === taskId)).toBe(true);
+		} finally {
+			if (stream) {
+				await stream.close();
+			}
+			await server.stop();
 			cleanupProject();
 			cleanupHome();
 		}

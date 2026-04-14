@@ -77,7 +77,6 @@ function aggregateBoardReducer(state: AggregateBoardState, action: AggregateBoar
 		return {
 			...state,
 			projects: action.payload.projects,
-			hasReceivedSnapshot: true,
 		};
 	}
 	if (action.type === "stream_error") {

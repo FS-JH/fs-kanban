@@ -27,6 +27,7 @@ const WORKSPACES_DIR = "workspaces";
 const INDEX_FILENAME = "index.json";
 const BOARD_FILENAME = "board.json";
 const SESSIONS_FILENAME = "sessions.json";
+const SESSION_REPLAY_FILENAME = "session-replay.json";
 const META_FILENAME = "meta.json";
 const INDEX_VERSION = 1;
 const WORKSPACE_ID_COLLISION_SUFFIX_LENGTH = 4;
@@ -128,6 +129,8 @@ const workspaceSessionsSchema = z
 		}
 	});
 
+const workspaceSessionReplayHistorySchema = z.record(z.string(), z.array(z.string()));
+
 export interface RuntimeWorkspaceContext {
 	repoPath: string;
 	workspaceId: string;
@@ -184,6 +187,10 @@ function getWorkspaceBoardPath(workspaceId: string): string {
 
 function getWorkspaceSessionsPath(workspaceId: string): string {
 	return join(getWorkspaceDirectoryPath(workspaceId), SESSIONS_FILENAME);
+}
+
+function getWorkspaceSessionReplayPath(workspaceId: string): string {
+	return join(getWorkspaceDirectoryPath(workspaceId), SESSION_REPLAY_FILENAME);
 }
 
 function getWorkspaceMetaPath(workspaceId: string): string {
@@ -304,6 +311,31 @@ async function readWorkspaceSessions(workspaceId: string): Promise<Record<string
 	const sessionsPath = getWorkspaceSessionsPath(workspaceId);
 	const rawSessions = await readJsonFile(sessionsPath);
 	return parsePersistedStateFile(sessionsPath, SESSIONS_FILENAME, rawSessions, workspaceSessionsSchema, {});
+}
+
+function decodeWorkspaceSessionReplayHistory(
+	replayHistoryByTaskId: Record<string, string[]>,
+): Record<string, Buffer[]> {
+	return Object.fromEntries(
+		Object.entries(replayHistoryByTaskId).map(([taskId, encodedHistory]) => [
+			taskId,
+			encodedHistory.map((chunk) => Buffer.from(chunk, "base64")),
+		]),
+	);
+}
+
+async function readWorkspaceSessionReplayHistory(
+	workspaceId: string,
+): Promise<Record<string, string[]>> {
+	const replayPath = getWorkspaceSessionReplayPath(workspaceId);
+	const rawReplayHistory = await readJsonFile(replayPath);
+	return parsePersistedStateFile(
+		replayPath,
+		SESSION_REPLAY_FILENAME,
+		rawReplayHistory,
+		workspaceSessionReplayHistorySchema,
+		{},
+	);
 }
 
 async function readWorkspaceMeta(workspaceId: string): Promise<WorkspaceStateMeta> {
@@ -639,6 +671,30 @@ export async function loadWorkspaceState(cwd: string): Promise<RuntimeWorkspaceS
 	const sessions = await readWorkspaceSessions(context.workspaceId);
 	const meta = await readWorkspaceMeta(context.workspaceId);
 	return toWorkspaceStateResponse(context, board, sessions, meta.revision);
+}
+
+export async function loadWorkspaceSessionReplayHistoryById(
+	workspaceId: string,
+): Promise<Record<string, Buffer[]>> {
+	return decodeWorkspaceSessionReplayHistory(await readWorkspaceSessionReplayHistory(workspaceId));
+}
+
+export async function saveWorkspaceTaskReplayHistoryById(
+	workspaceId: string,
+	taskId: string,
+	history: readonly Buffer[],
+): Promise<void> {
+	await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(workspaceId), async () => {
+		const replayHistoryByTaskId = await readWorkspaceSessionReplayHistory(workspaceId);
+		if (history.length === 0) {
+			delete replayHistoryByTaskId[taskId];
+		} else {
+			replayHistoryByTaskId[taskId] = history.map((chunk) => chunk.toString("base64"));
+		}
+		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceSessionReplayPath(workspaceId), replayHistoryByTaskId, {
+			lock: null,
+		});
+	});
 }
 
 export async function saveWorkspaceState(

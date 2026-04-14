@@ -11,9 +11,11 @@ import {
 	listWorkspaceIndexEntries,
 	loadWorkspaceContext,
 	loadWorkspaceContextById,
+	loadWorkspaceSessionReplayHistoryById,
 	loadWorkspaceState,
 	removeWorkspaceIndexEntry,
 	saveWorkspaceState,
+	saveWorkspaceTaskReplayHistoryById,
 } from "../../src/state/workspace-state.js";
 import { createGitTestEnv } from "../utilities/git-env.js";
 import { createTempDir } from "../utilities/temp-dir.js";
@@ -170,6 +172,35 @@ describe.sequential("workspace-state integration", () => {
 				const entriesAfterRemoval = await listWorkspaceIndexEntries();
 				expect(entriesAfterRemoval).toHaveLength(1);
 				expect(entriesAfterRemoval[0]?.workspaceId).toBe(contextB.workspaceId);
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("persists terminal replay history separately from workspace state", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-session-replay-");
+			try {
+				const workspacePath = join(sandboxRoot, "project-a");
+				mkdirSync(workspacePath, { recursive: true });
+				initGitRepository(workspacePath);
+
+				const context = await loadWorkspaceContext(workspacePath);
+				await saveWorkspaceTaskReplayHistoryById(context.workspaceId, "task-1", [
+					Buffer.from("first line", "utf8"),
+					Buffer.from("second line", "utf8"),
+				]);
+
+				const initialReplayHistory = await loadWorkspaceSessionReplayHistoryById(context.workspaceId);
+				expect(initialReplayHistory["task-1"]?.map((chunk) => chunk.toString("utf8"))).toEqual([
+					"first line",
+					"second line",
+				]);
+
+				await saveWorkspaceTaskReplayHistoryById(context.workspaceId, "task-1", []);
+				const clearedReplayHistory = await loadWorkspaceSessionReplayHistoryById(context.workspaceId);
+				expect(clearedReplayHistory["task-1"]).toBeUndefined();
 			} finally {
 				cleanup();
 			}

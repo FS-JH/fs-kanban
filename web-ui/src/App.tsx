@@ -915,17 +915,23 @@ export default function App(): ReactElement {
 							<div className="flex flex-1 flex-col min-h-0 min-w-0">
 								<div className="flex flex-1 min-h-0 min-w-0">
 									{isAggregateView ? (
-										<ActiveProjectsBoard
-											data={aggregateBoard}
-											onCardSelect={handleAggregateCardSelect}
-											onCommitTask={handleAggregateCommitTask}
-											onOpenPrTask={handleAggregateOpenPrTask}
-											onMoveToTrashTask={handleAggregateMoveToTrashTask}
-											onCancelAutomaticTaskAction={handleAggregateCancelAutomaticTaskAction}
-											commitTaskLoadingById={aggregateCommitTaskLoadingById}
-											openPrTaskLoadingById={aggregateOpenPrTaskLoadingById}
-											moveToTrashLoadingById={aggregateMoveToTrashLoadingById}
-										/>
+										!hasReceivedAggregateSnapshot && !aggregateStreamError ? (
+											<div className="flex flex-1 min-h-0 items-center justify-center bg-surface-0">
+												<Spinner size={30} />
+											</div>
+										) : (
+											<ActiveProjectsBoard
+												data={aggregateBoard}
+												onCardSelect={handleAggregateCardSelect}
+												onCommitTask={handleAggregateCommitTask}
+												onOpenPrTask={handleAggregateOpenPrTask}
+												onMoveToTrashTask={handleAggregateMoveToTrashTask}
+												onCancelAutomaticTaskAction={handleAggregateCancelAutomaticTaskAction}
+												commitTaskLoadingById={aggregateCommitTaskLoadingById}
+												openPrTaskLoadingById={aggregateOpenPrTaskLoadingById}
+												moveToTrashLoadingById={aggregateMoveToTrashLoadingById}
+											/>
+										)
 									) : isGitHistoryOpen ? (
 										<GitHistoryView
 											workspaceId={currentProjectId}

@@ -15,6 +15,7 @@ import type {
 	RuntimeStateStreamWorkspaceMetadataMessage,
 	RuntimeStateStreamWorkspaceStateMessage,
 	RuntimeTaskSessionSummary,
+	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
 import { createWorkspaceMetadataMonitor } from "./workspace-metadata-monitor.js";
@@ -61,6 +62,26 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 	const aggregateRuntimeStateClients = new Set<WebSocket>();
 	const runtimeStateClients = new Set<WebSocket>();
 	const runtimeStateWorkspaceIdByClient = new Map<WebSocket, string>();
+	const runtimeProjectsPayloadCache = {
+		payload: null as RuntimeStateStreamProjectsMessage | null,
+		inFlight: null as Promise<RuntimeStateStreamProjectsMessage> | null,
+	};
+	const aggregateSnapshotCache = {
+		snapshot: null as {
+			board: RuntimeStateStreamAggregateSnapshotMessage["board"];
+			generatedAt: number;
+		} | null,
+		inFlight: null as Promise<{
+			board: RuntimeStateStreamAggregateSnapshotMessage["board"];
+			generatedAt: number;
+		}> | null,
+	};
+	const workspaceStateSnapshotCache = new Map<string, RuntimeWorkspaceStateResponse>();
+	const workspaceStateSnapshotInFlightByWorkspaceId = new Map<string, Promise<RuntimeWorkspaceStateResponse>>();
+	const runtimeProjectsBroadcastState = {
+		inFlight: null as Promise<void> | null,
+		pendingPreferredCurrentProjectId: undefined as string | null | undefined,
+	};
 	const aggregateBoardBroadcastState = {
 		timer: null as NodeJS.Timeout | null,
 	};
@@ -95,23 +116,133 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		}
 	};
 
-	const broadcastRuntimeProjectsUpdated = async (preferredCurrentProjectId: string | null): Promise<void> => {
+	const adaptProjectsPayloadForPreferredWorkspace = (
+		payload: RuntimeStateStreamProjectsMessage,
+		preferredCurrentProjectId: string | null,
+	): RuntimeStateStreamProjectsMessage => {
+		if (!preferredCurrentProjectId) {
+			return payload;
+		}
+		if (!payload.projects.some((project) => project.id === preferredCurrentProjectId)) {
+			return payload;
+		}
+		if (payload.currentProjectId === preferredCurrentProjectId) {
+			return payload;
+		}
+		return {
+			...payload,
+			currentProjectId: preferredCurrentProjectId,
+		};
+	};
+
+	const getProjectsPayload = async (preferredCurrentProjectId: string | null): Promise<RuntimeStateStreamProjectsMessage> => {
+		const cachedPayload = runtimeProjectsPayloadCache.payload;
+		if (cachedPayload) {
+			return adaptProjectsPayloadForPreferredWorkspace(cachedPayload, preferredCurrentProjectId);
+		}
+		if (!runtimeProjectsPayloadCache.inFlight) {
+			runtimeProjectsPayloadCache.inFlight = deps.workspaceRegistry
+				.buildProjectsPayload(preferredCurrentProjectId)
+				.then((payload) => {
+					const message: RuntimeStateStreamProjectsMessage = {
+						type: "projects_updated",
+						currentProjectId: payload.currentProjectId,
+						projects: payload.projects,
+					};
+					runtimeProjectsPayloadCache.payload = message;
+					return message;
+				})
+				.finally(() => {
+					runtimeProjectsPayloadCache.inFlight = null;
+				});
+		}
+		const payload = await runtimeProjectsPayloadCache.inFlight;
+		return adaptProjectsPayloadForPreferredWorkspace(payload, preferredCurrentProjectId);
+	};
+
+	const getAggregateSnapshot = async (): Promise<{
+		board: RuntimeStateStreamAggregateSnapshotMessage["board"];
+		generatedAt: number;
+	}> => {
+		if (aggregateSnapshotCache.snapshot) {
+			return aggregateSnapshotCache.snapshot;
+		}
+		if (!aggregateSnapshotCache.inFlight) {
+			aggregateSnapshotCache.inFlight = deps.workspaceRegistry
+				.buildAggregateBoardSnapshot()
+				.then((snapshot) => {
+					aggregateSnapshotCache.snapshot = snapshot;
+					return snapshot;
+				})
+				.finally(() => {
+					aggregateSnapshotCache.inFlight = null;
+				});
+		}
+		return await aggregateSnapshotCache.inFlight;
+	};
+
+	const getWorkspaceStateSnapshot = async (
+		workspaceId: string,
+		workspacePath: string,
+	): Promise<RuntimeWorkspaceStateResponse> => {
+		const cachedSnapshot = workspaceStateSnapshotCache.get(workspaceId);
+		if (cachedSnapshot) {
+			return cachedSnapshot;
+		}
+		const inFlightSnapshot = workspaceStateSnapshotInFlightByWorkspaceId.get(workspaceId);
+		if (inFlightSnapshot) {
+			return await inFlightSnapshot;
+		}
+		const nextSnapshotPromise = deps.workspaceRegistry
+			.buildWorkspaceStateSnapshot(workspaceId, workspacePath)
+			.then((snapshot) => {
+				workspaceStateSnapshotCache.set(workspaceId, snapshot);
+				return snapshot;
+			})
+			.finally(() => {
+				workspaceStateSnapshotInFlightByWorkspaceId.delete(workspaceId);
+			});
+		workspaceStateSnapshotInFlightByWorkspaceId.set(workspaceId, nextSnapshotPromise);
+		return await nextSnapshotPromise;
+	};
+
+	const runRuntimeProjectsUpdatedBroadcast = async (preferredCurrentProjectId: string | null): Promise<void> => {
 		if (runtimeStateClients.size === 0) {
 			return;
 		}
 		try {
-			const payload = await deps.workspaceRegistry.buildProjectsPayload(preferredCurrentProjectId);
+			const nextPayload = await deps.workspaceRegistry.buildProjectsPayload(preferredCurrentProjectId);
+			const payload: RuntimeStateStreamProjectsMessage = {
+				type: "projects_updated",
+				currentProjectId: nextPayload.currentProjectId,
+				projects: nextPayload.projects,
+			};
+			runtimeProjectsPayloadCache.payload = payload;
 			for (const client of runtimeStateClients) {
-				sendRuntimeStateMessage(client, {
-					type: "projects_updated",
-					currentProjectId: payload.currentProjectId,
-					projects: payload.projects,
-				} satisfies RuntimeStateStreamProjectsMessage);
+				sendRuntimeStateMessage(client, payload);
 			}
 		} catch {
 			// Ignore transient project summary failures; next update will resync.
 		}
 		queueAggregateBoardUpdated();
+	};
+
+	const broadcastRuntimeProjectsUpdated = async (preferredCurrentProjectId: string | null): Promise<void> => {
+		runtimeProjectsBroadcastState.pendingPreferredCurrentProjectId = preferredCurrentProjectId;
+		if (runtimeProjectsBroadcastState.inFlight) {
+			await runtimeProjectsBroadcastState.inFlight;
+			return;
+		}
+		runtimeProjectsBroadcastState.inFlight = (async () => {
+			while (runtimeProjectsBroadcastState.pendingPreferredCurrentProjectId !== undefined) {
+				const nextPreferredCurrentProjectId = runtimeProjectsBroadcastState.pendingPreferredCurrentProjectId;
+				runtimeProjectsBroadcastState.pendingPreferredCurrentProjectId = undefined;
+				await runRuntimeProjectsUpdatedBroadcast(nextPreferredCurrentProjectId ?? null);
+			}
+		})().finally(() => {
+			runtimeProjectsBroadcastState.inFlight = null;
+		});
+		await runtimeProjectsBroadcastState.inFlight;
 	};
 
 	const broadcastAggregateBoardUpdated = async (): Promise<void> => {
@@ -120,6 +251,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		}
 		try {
 			const snapshot = await deps.workspaceRegistry.buildAggregateBoardSnapshot();
+			aggregateSnapshotCache.snapshot = snapshot;
 			for (const client of aggregateRuntimeStateClients) {
 				sendRuntimeStateMessage(client, {
 					type: "aggregate_board_updated",
@@ -151,6 +283,19 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		}
 		pendingTaskSessionSummariesByWorkspaceId.delete(workspaceId);
 		const summaries = Array.from(pending.values());
+		const cachedWorkspaceState = workspaceStateSnapshotCache.get(workspaceId);
+		if (cachedWorkspaceState) {
+			const nextSessions = {
+				...cachedWorkspaceState.sessions,
+			};
+			for (const summary of summaries) {
+				nextSessions[summary.taskId] = summary;
+			}
+			workspaceStateSnapshotCache.set(workspaceId, {
+				...cachedWorkspaceState,
+				sessions: nextSessions,
+			});
+		}
 		const runtimeClients = runtimeStateClientsByWorkspaceId.get(workspaceId);
 		if (runtimeClients && runtimeClients.size > 0) {
 			const payload: RuntimeStateStreamTaskSessionsMessage = {
@@ -220,6 +365,8 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		terminalSummaryUnsubscribeByWorkspaceId.delete(workspaceId);
 		previousTaskSessionSummaryByWorkspaceId.delete(workspaceId);
 		disposeTaskSessionSummaryBroadcast(workspaceId);
+		workspaceStateSnapshotCache.delete(workspaceId);
+		workspaceStateSnapshotInFlightByWorkspaceId.delete(workspaceId);
 		workspaceMetadataMonitor.disposeWorkspace(workspaceId);
 
 		if (!options?.disconnectClients) {
@@ -254,6 +401,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		const clients = runtimeStateClientsByWorkspaceId.get(workspaceId);
 		try {
 			const workspaceState = await deps.workspaceRegistry.buildWorkspaceStateSnapshot(workspaceId, workspacePath);
+			workspaceStateSnapshotCache.set(workspaceId, workspaceState);
 			if (clients && clients.size > 0) {
 				const payload: RuntimeStateStreamWorkspaceStateMessage = {
 					type: "workspace_state_updated",
@@ -309,11 +457,9 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					? (context as { requestedWorkspaceId: string }).requestedWorkspaceId || null
 					: null;
 			if (isAggregateView) {
-				runtimeStateClients.add(client);
-				aggregateRuntimeStateClients.add(client);
 				const [projectsPayload, aggregateSnapshot] = await Promise.all([
-					deps.workspaceRegistry.buildProjectsPayload(null),
-					deps.workspaceRegistry.buildAggregateBoardSnapshot(),
+					getProjectsPayload(null),
+					getAggregateSnapshot(),
 				]);
 				if (client.readyState !== WebSocket.OPEN) {
 					cleanupRuntimeStateClient(client);
@@ -325,6 +471,12 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					board: aggregateSnapshot.board,
 					generatedAt: aggregateSnapshot.generatedAt,
 				} satisfies RuntimeStateStreamAggregateSnapshotMessage);
+				if (client.readyState !== WebSocket.OPEN) {
+					cleanupRuntimeStateClient(client);
+					return;
+				}
+				runtimeStateClients.add(client);
+				aggregateRuntimeStateClients.add(client);
 				return;
 			}
 			const workspace: ResolvedWorkspaceStreamTarget = await deps.workspaceRegistry.resolveWorkspaceForStream(
@@ -362,18 +514,16 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 
 				To avoid that, we:
 
-				1. add the socket only to the global runtimeStateClients set so project-wide broadcasts still work
-				2. build workspace state and connect the metadata monitor to get the initial metadata snapshot
-				3. send the combined "snapshot" message
-				4. only then register the socket in runtimeStateClientsByWorkspaceId so future incremental
-				   workspace_metadata_updated events can flow normally
+				1. build workspace state and connect the metadata monitor to get the initial metadata snapshot
+				2. send the combined "snapshot" message
+				3. only then register the socket in runtimeStateClients and runtimeStateClientsByWorkspaceId so
+				   future incremental projects_updated and workspace_metadata_updated events can flow normally
 
 				The extra readyState checks and monitor cleanup below are paired with this delayed registration. If the
 				socket closes while we are still assembling or sending the initial snapshot, we must disconnect the
 				temporary metadata monitor subscription before returning, otherwise we would leave behind subscriber count
 				state for a client that never finished the handshake.
 			*/
-			runtimeStateClients.add(client);
 			let monitorWorkspaceId: string | null = null;
 			let didConnectWorkspaceMonitor = false;
 
@@ -387,8 +537,8 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 				if (workspace.workspaceId && workspace.workspacePath) {
 					monitorWorkspaceId = workspace.workspaceId;
 					[projectsPayload, workspaceState] = await Promise.all([
-						deps.workspaceRegistry.buildProjectsPayload(workspace.workspaceId),
-						deps.workspaceRegistry.buildWorkspaceStateSnapshot(workspace.workspaceId, workspace.workspacePath),
+						getProjectsPayload(workspace.workspaceId),
+						getWorkspaceStateSnapshot(workspace.workspaceId, workspace.workspacePath),
 					]);
 					workspaceMetadata = await workspaceMetadataMonitor.connectWorkspace({
 						workspaceId: workspace.workspaceId,
@@ -397,7 +547,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					});
 					didConnectWorkspaceMonitor = true;
 				} else {
-					projectsPayload = await deps.workspaceRegistry.buildProjectsPayload(null);
+					projectsPayload = await getProjectsPayload(null);
 					workspaceState = null;
 					workspaceMetadata = null;
 				}
@@ -422,6 +572,7 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 					cleanupRuntimeStateClient(client);
 					return;
 				}
+				runtimeStateClients.add(client);
 				if (monitorWorkspaceId) {
 					const workspaceClients =
 						runtimeStateClientsByWorkspaceId.get(monitorWorkspaceId) ?? new Set<WebSocket>();
@@ -504,6 +655,11 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 			}
 			taskSessionBroadcastTimersByWorkspaceId.clear();
 			pendingTaskSessionSummariesByWorkspaceId.clear();
+			runtimeProjectsBroadcastState.pendingPreferredCurrentProjectId = undefined;
+			runtimeProjectsPayloadCache.payload = null;
+			aggregateSnapshotCache.snapshot = null;
+			workspaceStateSnapshotCache.clear();
+			workspaceStateSnapshotInFlightByWorkspaceId.clear();
 			for (const unsubscribe of terminalSummaryUnsubscribeByWorkspaceId.values()) {
 				try {
 					unsubscribe();

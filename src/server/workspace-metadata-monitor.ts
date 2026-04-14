@@ -8,6 +8,7 @@ import { getGitSyncSummary, probeGitWorkspaceState } from "../workspace/git-sync
 import { getTaskWorkspacePathInfo } from "../workspace/task-worktree.js";
 
 const WORKSPACE_METADATA_POLL_INTERVAL_MS = 1_000;
+const WORKSPACE_METADATA_IDLE_CACHE_MS = 30_000;
 
 interface TrackedTaskWorkspace {
 	taskId: string;
@@ -30,6 +31,7 @@ interface WorkspaceMetadataEntry {
 	trackedTasks: TrackedTaskWorkspace[];
 	subscriberCount: number;
 	pollTimer: NodeJS.Timeout | null;
+	idleDisposeTimer: NodeJS.Timeout | null;
 	refreshPromise: Promise<RuntimeWorkspaceMetadata> | null;
 	homeGit: CachedHomeGitMetadata;
 	taskMetadataByTaskId: Map<string, CachedTaskWorkspaceMetadata>;
@@ -142,6 +144,7 @@ function createWorkspaceEntry(workspacePath: string): WorkspaceMetadataEntry {
 		trackedTasks: [],
 		subscriberCount: 0,
 		pollTimer: null,
+		idleDisposeTimer: null,
 		refreshPromise: null,
 		homeGit: {
 			summary: null,
@@ -280,6 +283,14 @@ export function createWorkspaceMetadataMonitor(
 		entry.pollTimer = null;
 	};
 
+	const cancelWorkspaceIdleDispose = (entry: WorkspaceMetadataEntry) => {
+		if (!entry.idleDisposeTimer) {
+			return;
+		}
+		clearTimeout(entry.idleDisposeTimer);
+		entry.idleDisposeTimer = null;
+	};
+
 	const refreshWorkspace = async (workspaceId: string): Promise<RuntimeWorkspaceMetadata> => {
 		const entry = workspaces.get(workspaceId);
 		if (!entry) {
@@ -328,6 +339,7 @@ export function createWorkspaceMetadataMonitor(
 		board: RuntimeBoardData;
 	}): WorkspaceMetadataEntry => {
 		const existing = workspaces.get(input.workspaceId) ?? createWorkspaceEntry(input.workspacePath);
+		cancelWorkspaceIdleDispose(existing);
 		existing.workspacePath = input.workspacePath;
 		existing.trackedTasks = collectTrackedTasks(input.board);
 		workspaces.set(input.workspaceId, existing);
@@ -345,11 +357,32 @@ export function createWorkspaceMetadataMonitor(
 		entry.pollTimer = timer;
 	};
 
+	const scheduleWorkspaceIdleDispose = (workspaceId: string, entry: WorkspaceMetadataEntry) => {
+		cancelWorkspaceIdleDispose(entry);
+		const timer = setTimeout(() => {
+			const current = workspaces.get(workspaceId);
+			if (!current || current.subscriberCount > 0) {
+				return;
+			}
+			stopWorkspaceTimer(current);
+			current.idleDisposeTimer = null;
+			workspaces.delete(workspaceId);
+		}, WORKSPACE_METADATA_IDLE_CACHE_MS);
+		timer.unref();
+		entry.idleDisposeTimer = timer;
+	};
+
 	return {
 		connectWorkspace: async ({ workspaceId, workspacePath, board }) => {
 			const entry = updateWorkspaceEntry({ workspaceId, workspacePath, board });
+			const hasCachedSnapshot =
+				entry.homeGit.stateVersion > 0 || entry.taskMetadataByTaskId.size > 0 || entry.trackedTasks.length === 0;
 			entry.subscriberCount += 1;
 			ensureWorkspaceTimer(workspaceId, entry);
+			if (hasCachedSnapshot) {
+				void refreshWorkspace(workspaceId);
+				return buildWorkspaceMetadataSnapshot(entry);
+			}
 			return await refreshWorkspace(workspaceId);
 		},
 		updateWorkspaceState: async ({ workspaceId, workspacePath, board }) => {
@@ -369,7 +402,7 @@ export function createWorkspaceMetadataMonitor(
 				return;
 			}
 			stopWorkspaceTimer(entry);
-			workspaces.delete(workspaceId);
+			scheduleWorkspaceIdleDispose(workspaceId, entry);
 		},
 		disposeWorkspace: (workspaceId) => {
 			const entry = workspaces.get(workspaceId);
@@ -377,11 +410,13 @@ export function createWorkspaceMetadataMonitor(
 				return;
 			}
 			stopWorkspaceTimer(entry);
+			cancelWorkspaceIdleDispose(entry);
 			workspaces.delete(workspaceId);
 		},
 		close: () => {
 			for (const entry of workspaces.values()) {
 				stopWorkspaceTimer(entry);
+				cancelWorkspaceIdleDispose(entry);
 			}
 			workspaces.clear();
 		},
