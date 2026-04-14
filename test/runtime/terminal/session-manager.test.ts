@@ -84,6 +84,27 @@ describe("TerminalSessionManager", () => {
 		expect(hydrated?.reviewReason).toBe("interrupted");
 	});
 
+	it("hydrates persisted replay output history for interrupted sessions", () => {
+		const manager = new TerminalSessionManager();
+		const onOutput = vi.fn();
+		manager.hydrateFromRecord(
+			{
+				"task-1": createSummary({ state: "running" }),
+			},
+			{
+				"task-1": [Buffer.from("persisted output", "utf8")],
+			},
+		);
+
+		manager.attach("task-1", {
+			onOutput,
+		});
+
+		expect(onOutput).toHaveBeenCalledTimes(1);
+		expect((onOutput.mock.calls[0]?.[0] as Buffer).toString("utf8")).toBe("persisted output");
+		expect(manager.getSummary("task-1")?.state).toBe("interrupted");
+	});
+
 	it("recovers stale running sessions without active processes as interrupted", () => {
 		const manager = new TerminalSessionManager();
 		(
@@ -93,6 +114,7 @@ describe("TerminalSessionManager", () => {
 					{
 						summary: RuntimeTaskSessionSummary;
 						active: null;
+						replayOutputHistory: Buffer[];
 						listenerIdCounter: number;
 						listeners: Map<number, unknown>;
 						restartRequest: null;
@@ -105,6 +127,7 @@ describe("TerminalSessionManager", () => {
 		).entries.set("task-1", {
 			summary: createSummary({ state: "running" }),
 			active: null,
+			replayOutputHistory: [],
 			listenerIdCounter: 1,
 			listeners: new Map(),
 			restartRequest: null,
@@ -163,6 +186,7 @@ describe("TerminalSessionManager", () => {
 					suppressDeviceAttributeQueries: false,
 				},
 			},
+			replayOutputHistory: [],
 			listenerIdCounter: 1,
 			listeners: new Map(),
 		};
@@ -198,6 +222,7 @@ describe("TerminalSessionManager", () => {
 					suppressDeviceAttributeQueries: false,
 				},
 			},
+			replayOutputHistory: [],
 			listenerIdCounter: 1,
 			listeners: new Map(),
 		};
@@ -228,6 +253,7 @@ describe("TerminalSessionManager", () => {
 				cols: 80,
 				rows: 24,
 			},
+			replayOutputHistory: [],
 			listenerIdCounter: 1,
 			listeners: new Map(),
 		};
@@ -240,5 +266,29 @@ describe("TerminalSessionManager", () => {
 		const resized = manager.resize("task-resize", 100, 30, 1200, 720);
 		expect(resized).toBe(true);
 		expect(resizeSpy).toHaveBeenCalledWith(100, 30, 1200, 720);
+	});
+
+	it("replays cached output history for interrupted sessions without an active process", () => {
+		const manager = new TerminalSessionManager();
+		const onOutput = vi.fn();
+		const entry = {
+			summary: createSummary({ taskId: "task-interrupted", state: "interrupted", reviewReason: "interrupted" }),
+			active: null,
+			replayOutputHistory: [Buffer.from("previous output", "utf8")],
+			listenerIdCounter: 1,
+			listeners: new Map(),
+		};
+		(
+			manager as unknown as {
+				entries: Map<string, typeof entry>;
+			}
+		).entries.set("task-interrupted", entry);
+
+		manager.attach("task-interrupted", {
+			onOutput,
+		});
+
+		expect(onOutput).toHaveBeenCalledTimes(1);
+		expect((onOutput.mock.calls[0]?.[0] as Buffer).toString("utf8")).toBe("previous output");
 	});
 });

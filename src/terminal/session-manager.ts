@@ -35,6 +35,7 @@ import type { TerminalSessionListener, TerminalSessionService } from "./terminal
 const MAX_WORKSPACE_TRUST_BUFFER_CHARS = 16_384;
 const AUTO_RESTART_WINDOW_MS = 5_000;
 const MAX_AUTO_RESTARTS_PER_WINDOW = 3;
+const REPLAY_HISTORY_FLUSH_MS = 1_000;
 // OpenCode can query OSC 11 before the browser terminal is attached and ready to answer.
 // We intercept that startup probe during history replay and early PTY output, synthesize a
 // background-color reply, then disable the filter once a live terminal listener has attached.
@@ -61,6 +62,7 @@ interface ActiveProcessState {
 interface SessionEntry {
 	summary: RuntimeTaskSessionSummary;
 	active: ActiveProcessState | null;
+	replayOutputHistory: Buffer[];
 	listenerIdCounter: number;
 	listeners: Map<number, TerminalSessionListener>;
 	restartRequest: RestartableSessionRequest | null;
@@ -202,6 +204,8 @@ function buildTerminalEnvironment(
 export class TerminalSessionManager implements TerminalSessionService {
 	private readonly entries = new Map<string, SessionEntry>();
 	private readonly summaryListeners = new Set<(summary: RuntimeTaskSessionSummary) => void>();
+	private readonly replayHistoryListeners = new Set<(taskId: string, history: readonly Buffer[]) => void>();
+	private readonly replayHistoryFlushTimers = new Map<string, NodeJS.Timeout>();
 
 	onSummary(listener: (summary: RuntimeTaskSessionSummary) => void): () => void {
 		this.summaryListeners.add(listener);
@@ -210,11 +214,22 @@ export class TerminalSessionManager implements TerminalSessionService {
 		};
 	}
 
-	hydrateFromRecord(record: Record<string, RuntimeTaskSessionSummary>): void {
+	onReplayHistory(listener: (taskId: string, history: readonly Buffer[]) => void): () => void {
+		this.replayHistoryListeners.add(listener);
+		return () => {
+			this.replayHistoryListeners.delete(listener);
+		};
+	}
+
+	hydrateFromRecord(
+		record: Record<string, RuntimeTaskSessionSummary>,
+		replayHistoryByTaskId: Record<string, readonly Buffer[]> = {},
+	): void {
 		for (const [taskId, summary] of Object.entries(record)) {
 			this.entries.set(taskId, {
 				summary: normalizeStaleSessionSummary(summary),
 				active: null,
+				replayOutputHistory: (replayHistoryByTaskId[taskId] ?? []).map((chunk) => Buffer.from(chunk)),
 				listenerIdCounter: 1,
 				listeners: new Map(),
 				restartRequest: null,
@@ -234,6 +249,18 @@ export class TerminalSessionManager implements TerminalSessionService {
 		return Array.from(this.entries.values()).map((entry) => cloneSummary(entry.summary));
 	}
 
+	listReplayHistories(): Record<string, Buffer[]> {
+		const histories: Record<string, Buffer[]> = {};
+		for (const [taskId, entry] of this.entries) {
+			const history = this.getReplayHistorySnapshot(entry);
+			if (history.length === 0) {
+				continue;
+			}
+			histories[taskId] = history;
+		}
+		return histories;
+	}
+
 	attach(taskId: string, listener: TerminalSessionListener): (() => void) | null {
 		const entry = this.ensureEntry(taskId);
 
@@ -242,7 +269,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			interceptOsc11BackgroundQueries: true,
 			suppressDeviceAttributeQueries: entry.active?.terminalProtocolFilter.suppressDeviceAttributeQueries ?? false,
 		});
-		for (const chunk of entry.active?.session.getOutputHistory() ?? []) {
+		for (const chunk of entry.active?.session.getOutputHistory() ?? entry.replayOutputHistory) {
 			const filteredChunk = filterTerminalProtocolOutput(replayFilterState, chunk, {
 				onOsc11BackgroundQuery: () => entry.active?.session.write(OSC_BACKGROUND_QUERY_REPLY),
 			});
@@ -278,6 +305,8 @@ export class TerminalSessionManager implements TerminalSessionService {
 			entry.active.session.stop();
 			entry.active = null;
 		}
+		entry.replayOutputHistory = [];
+		this.flushReplayHistory(request.taskId);
 
 		const cols = Number.isFinite(request.cols) && (request.cols ?? 0) > 0 ? Math.floor(request.cols ?? 0) : 120;
 		const rows = Number.isFinite(request.rows) && (request.rows ?? 0) > 0 ? Math.floor(request.rows ?? 0) : 40;
@@ -380,6 +409,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 					for (const taskListener of entry.listeners.values()) {
 						taskListener.onOutput?.(filteredChunk);
 					}
+					this.scheduleReplayHistoryFlush(request.taskId);
 				},
 				onExit: (event) => {
 					const currentEntry = this.entries.get(request.taskId);
@@ -403,7 +433,11 @@ export class TerminalSessionManager implements TerminalSessionService {
 						taskListener.onState?.(cloneSummary(summary));
 						taskListener.onExit?.(event.exitCode);
 					}
+					currentEntry.replayOutputHistory = currentActive.session
+						.getOutputHistory()
+						.map((chunk) => Buffer.from(chunk));
 					currentEntry.active = null;
+					this.flushReplayHistory(request.taskId);
 					this.emitSummary(summary);
 					if (shouldAutoRestart) {
 						this.scheduleAutoRestart(currentEntry);
@@ -501,6 +535,8 @@ export class TerminalSessionManager implements TerminalSessionService {
 			entry.active.session.stop();
 			entry.active = null;
 		}
+		entry.replayOutputHistory = [];
+		this.flushReplayHistory(request.taskId);
 
 		const cols = Number.isFinite(request.cols) && (request.cols ?? 0) > 0 ? Math.floor(request.cols ?? 0) : 120;
 		const rows = Number.isFinite(request.rows) && (request.rows ?? 0) > 0 ? Math.floor(request.rows ?? 0) : 40;
@@ -540,6 +576,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 					for (const taskListener of entry.listeners.values()) {
 						taskListener.onOutput?.(filteredChunk);
 					}
+					this.scheduleReplayHistoryFlush(request.taskId);
 				},
 				onExit: (event) => {
 					const currentEntry = this.entries.get(request.taskId);
@@ -563,7 +600,11 @@ export class TerminalSessionManager implements TerminalSessionService {
 						taskListener.onState?.(cloneSummary(summary));
 						taskListener.onExit?.(event.exitCode);
 					}
+					currentEntry.replayOutputHistory = currentActive.session
+						.getOutputHistory()
+						.map((chunk) => Buffer.from(chunk));
 					currentEntry.active = null;
+					this.flushReplayHistory(request.taskId);
 					this.emitSummary(summary);
 				},
 			});
@@ -874,6 +915,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 		const created: SessionEntry = {
 			summary: createDefaultSummary(taskId),
 			active: null,
+			replayOutputHistory: [],
 			listenerIdCounter: 1,
 			listeners: new Map(),
 			restartRequest: null,
@@ -883,6 +925,39 @@ export class TerminalSessionManager implements TerminalSessionService {
 		};
 		this.entries.set(taskId, created);
 		return created;
+	}
+
+	private getReplayHistorySnapshot(entry: SessionEntry): Buffer[] {
+		const source = entry.active?.session.getOutputHistory() ?? entry.replayOutputHistory;
+		return source.map((chunk) => Buffer.from(chunk));
+	}
+
+	private scheduleReplayHistoryFlush(taskId: string): void {
+		if (this.replayHistoryFlushTimers.has(taskId)) {
+			return;
+		}
+		const timer = setTimeout(() => {
+			this.replayHistoryFlushTimers.delete(taskId);
+			this.flushReplayHistory(taskId);
+		}, REPLAY_HISTORY_FLUSH_MS);
+		timer.unref();
+		this.replayHistoryFlushTimers.set(taskId, timer);
+	}
+
+	private flushReplayHistory(taskId: string): void {
+		const timer = this.replayHistoryFlushTimers.get(taskId);
+		if (timer) {
+			clearTimeout(timer);
+			this.replayHistoryFlushTimers.delete(taskId);
+		}
+		const entry = this.entries.get(taskId);
+		if (!entry) {
+			return;
+		}
+		const history = this.getReplayHistorySnapshot(entry);
+		for (const listener of this.replayHistoryListeners) {
+			listener(taskId, history);
+		}
 	}
 
 	private shouldAutoRestart(entry: SessionEntry): boolean {

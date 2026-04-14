@@ -12,10 +12,12 @@ import type {
 import {
 	listWorkspaceIndexEntries,
 	loadWorkspaceContext,
+	loadWorkspaceSessionReplayHistoryById,
 	loadWorkspaceState,
 	type RuntimeWorkspaceIndexEntry,
 	removeWorkspaceIndexEntry,
 	removeWorkspaceStateFiles,
+	saveWorkspaceTaskReplayHistoryById,
 } from "../state/workspace-state.js";
 import { TerminalSessionManager } from "../terminal/session-manager.js";
 import { getGitSyncSummary, probeGitWorkspaceState } from "../workspace/git-sync.js";
@@ -264,6 +266,7 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 	const projectTaskCountsByWorkspaceId = new Map<string, RuntimeProjectTaskCounts>();
 	const terminalManagersByWorkspaceId = new Map<string, TerminalSessionManager>();
 	const terminalManagerLoadPromises = new Map<string, Promise<TerminalSessionManager>>();
+	const replayHistoryUnsubscribeByWorkspaceId = new Map<string, () => void>();
 
 	const rememberWorkspace = (workspaceId: string, repoPath: string): void => {
 		workspacePathsById.set(workspaceId, repoPath);
@@ -297,10 +300,17 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			const manager = new TerminalSessionManager();
 			try {
 				const existingWorkspace = await loadWorkspaceState(repoPath);
-				manager.hydrateFromRecord(existingWorkspace.sessions);
+				const replayHistoryByTaskId = await loadWorkspaceSessionReplayHistoryById(workspaceId);
+				manager.hydrateFromRecord(existingWorkspace.sessions, replayHistoryByTaskId);
 			} catch {
 				// Workspace state will be created on demand.
 			}
+			const unsubscribeReplayHistory = manager.onReplayHistory((taskId, history) => {
+				void saveWorkspaceTaskReplayHistoryById(workspaceId, taskId, history).catch(() => {
+					// Best effort: replay history persistence should not break the runtime.
+				});
+			});
+			replayHistoryUnsubscribeByWorkspaceId.set(workspaceId, unsubscribeReplayHistory);
 			terminalManagersByWorkspaceId.set(workspaceId, manager);
 			return manager;
 		})().finally(() => {
@@ -338,6 +348,11 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			}
 			terminalManagersByWorkspaceId.delete(workspaceId);
 			terminalManagerLoadPromises.delete(workspaceId);
+		}
+		const unsubscribeReplayHistory = replayHistoryUnsubscribeByWorkspaceId.get(workspaceId);
+		if (unsubscribeReplayHistory) {
+			unsubscribeReplayHistory();
+			replayHistoryUnsubscribeByWorkspaceId.delete(workspaceId);
 		}
 		projectTaskCountsByWorkspaceId.delete(workspaceId);
 		const workspacePath = workspacePathsById.get(workspaceId) ?? null;
@@ -455,9 +470,6 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 				}
 				for (const card of column.cards) {
 					const session = sessions[card.id] ?? null;
-					if (session?.state === "interrupted") {
-						continue;
-					}
 					const effectiveColumnId =
 						column.id === "in_progress" && session?.state === "awaiting_review" ? "review" : column.id;
 					const taskWorkspace = await buildTaskWorkspaceMetadata(project.repoPath, card);
