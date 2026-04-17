@@ -80,6 +80,7 @@ export interface WorkspaceRegistry {
 		taskCounts: RuntimeProjectTaskCounts;
 	}) => RuntimeProjectSummary;
 	buildWorkspaceStateSnapshot: (workspaceId: string, workspacePath: string) => Promise<RuntimeWorkspaceStateResponse>;
+	invalidateWorkspaceSnapshotCache: (workspaceId: string) => void;
 	buildProjectsPayload: (preferredCurrentProjectId: string | null) => Promise<{
 		currentProjectId: string | null;
 		projects: RuntimeProjectSummary[];
@@ -393,29 +394,62 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 		}
 	};
 
+	// Short-lived snapshot cache with in-flight dedup. External callers like
+	// the Foundation EA dashboard poll every N projects; without dedup, each
+	// tRPC workspace.getState hit re-reads the workspace state from disk and
+	// re-enters the snapshot build path. 1s is short enough that mutations
+	// still feel immediate (they invalidate via notifyStateUpdated) but long
+	// enough to absorb a burst of concurrent polls.
+	const WORKSPACE_SNAPSHOT_CACHE_TTL_MS = 1_000;
+	const workspaceSnapshotCache = new Map<string, { expiresAt: number; value: RuntimeWorkspaceStateResponse }>();
+	const workspaceSnapshotInFlight = new Map<string, Promise<RuntimeWorkspaceStateResponse>>();
+
+	const invalidateWorkspaceSnapshotCache = (workspaceId: string): void => {
+		workspaceSnapshotCache.delete(workspaceId);
+	};
+
 	const buildWorkspaceStateSnapshot = async (
 		workspaceId: string,
 		workspacePath: string,
 	): Promise<RuntimeWorkspaceStateResponse> => {
-		const response = await loadWorkspaceStateById(workspaceId, workspacePath);
-		// Only overlay *live* session state from an already-initialized terminal
-		// manager. Previously this unconditionally awaited
-		// ensureTerminalManagerForWorkspace, which hydrated session state from
-		// disk and spun up the manager every time a polling client (notably
-		// the Foundation EA dashboard) requested workspace state. For non-
-		// active workspaces this added multi-second cold-boot cost to what is
-		// supposed to be a read-only call, backing up fs-kanban's request
-		// queue. Active/subscribed workspaces still have their terminal
-		// manager initialized via setActiveWorkspace and runtime-state-hub
-		// subscription paths, so this only skips the work when nobody has
-		// asked us to hydrate.
-		const terminalManager = getTerminalManagerForWorkspace(workspaceId);
-		if (terminalManager) {
-			for (const summary of terminalManager.listSummaries()) {
-				response.sessions[summary.taskId] = summary;
-			}
+		const cached = workspaceSnapshotCache.get(workspaceId);
+		if (cached && cached.expiresAt > Date.now()) {
+			return cached.value;
 		}
-		return response;
+		const existing = workspaceSnapshotInFlight.get(workspaceId);
+		if (existing) {
+			return await existing;
+		}
+		const promise = (async (): Promise<RuntimeWorkspaceStateResponse> => {
+			const response = await loadWorkspaceStateById(workspaceId, workspacePath);
+			// Only overlay *live* session state from an already-initialized
+			// terminal manager. Previously this unconditionally awaited
+			// ensureTerminalManagerForWorkspace, which hydrated session state
+			// from disk and spun up the manager every time a polling client
+			// (notably the Foundation EA dashboard) requested workspace
+			// state. For non-active workspaces this added multi-second cold-
+			// boot cost to what is supposed to be a read-only call, backing
+			// up fs-kanban's request queue. Active/subscribed workspaces
+			// still have their terminal manager initialized via
+			// setActiveWorkspace and runtime-state-hub subscription paths,
+			// so this only skips the work when nobody has asked us to
+			// hydrate.
+			const terminalManager = getTerminalManagerForWorkspace(workspaceId);
+			if (terminalManager) {
+				for (const summary of terminalManager.listSummaries()) {
+					response.sessions[summary.taskId] = summary;
+				}
+			}
+			workspaceSnapshotCache.set(workspaceId, {
+				expiresAt: Date.now() + WORKSPACE_SNAPSHOT_CACHE_TTL_MS,
+				value: response,
+			});
+			return response;
+		})().finally(() => {
+			workspaceSnapshotInFlight.delete(workspaceId);
+		});
+		workspaceSnapshotInFlight.set(workspaceId, promise);
+		return await promise;
 	};
 
 	const buildProjectsPayload = async (preferredCurrentProjectId: string | null) => {
@@ -638,6 +672,7 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 		summarizeProjectTaskCounts,
 		createProjectSummary: toProjectSummary,
 		buildWorkspaceStateSnapshot,
+		invalidateWorkspaceSnapshotCache,
 		buildProjectsPayload,
 		buildAggregateBoardSnapshot,
 		resolveWorkspaceForStream,
