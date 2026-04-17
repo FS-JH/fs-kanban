@@ -6,10 +6,9 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-
-import packageJson from "../../package.json" with { type: "json" };
 import { describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import packageJson from "../../package.json" with { type: "json" };
 
 import type {
 	RuntimeBoardData,
@@ -262,12 +261,7 @@ async function waitForExit(childProcess: ChildProcess, timeoutMs: number): Promi
 	});
 }
 
-async function startKanbanServer(input: {
-	cwd: string;
-	homeDir: string;
-	port: number;
-	extraArgs?: string[];
-}): Promise<{
+async function startKanbanServer(input: { cwd: string; homeDir: string; port: number; extraArgs?: string[] }): Promise<{
 	runtimeUrl: string;
 	stop: () => Promise<void>;
 }> {
@@ -286,13 +280,13 @@ async function startKanbanServer(input: {
 			...(input.extraArgs ?? []),
 		],
 		{
-		cwd: input.cwd,
-		env: createGitTestEnv({
-			HOME: input.homeDir,
-			USERPROFILE: input.homeDir,
-			KANBAN_RUNTIME_PORT: String(input.port),
-		}),
-		stdio: ["ignore", "pipe", "pipe", "ipc"],
+			cwd: input.cwd,
+			env: createGitTestEnv({
+				HOME: input.homeDir,
+				USERPROFILE: input.homeDir,
+				KANBAN_RUNTIME_PORT: String(input.port),
+			}),
+			stdio: ["ignore", "pipe", "pipe", "ipc"],
 		},
 	);
 	const { runtimeUrl } = await waitForProcessStart(child);
@@ -1033,6 +1027,10 @@ describe.sequential("runtime state stream integration", () => {
 
 			writeFileSync(join(ensureResponse.payload.path, "task-change.txt"), "updated\n", "utf8");
 
+			// Poll cadence is 15s by default; give two windows before declaring
+			// this path broken. The underlying probe runs faster when the
+			// workspace is already cache-warm, but the test creates a fresh
+			// worktree so we are squarely on the poll timer.
 			const metadataMessage = await stream.waitForMessage(
 				(message) =>
 					message.type === "workspace_metadata_updated" &&
@@ -1040,7 +1038,7 @@ describe.sequential("runtime state stream integration", () => {
 					message.workspaceMetadata.taskWorkspaces.some(
 						(task) => task.taskId === taskId && (task.changedFiles ?? 0) > 0,
 					),
-				10_000,
+				35_000,
 			);
 			expect(metadataMessage.type).toBe("workspace_metadata_updated");
 			if (metadataMessage.type !== "workspace_metadata_updated") {

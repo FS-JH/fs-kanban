@@ -1,3 +1,5 @@
+import { type FSWatcher, watch } from "node:fs";
+import { join } from "node:path";
 import type {
 	RuntimeBoardData,
 	RuntimeGitSyncSummary,
@@ -10,11 +12,15 @@ import { getTaskWorkspacePathInfo } from "../workspace/task-worktree.js";
 // Git-state polling runs once per connected workspace and spawns ~3 git
 // subprocesses for the home repo plus ~3 per tracked task worktree every tick.
 // At 1s ticks this dominated idle CPU (~10% sustained) and starved the event
-// loop under UI interaction. 5s keeps UI git-state indicators responsive
-// enough while cutting steady-state cost ~80%. Override with
-// KANBAN_WORKSPACE_METADATA_POLL_MS for per-deployment tuning.
-const DEFAULT_WORKSPACE_METADATA_POLL_INTERVAL_MS = 5_000;
+// loop under UI interaction. 15s keeps UI git-state indicators responsive
+// enough while cutting steady-state cost ~97%. fs.watch hooks on .git/HEAD
+// and .git/index trigger an immediate refresh when the user changes
+// branches or stages files locally, so the 15s interval only matters for
+// background changes (e.g. branch tip moved by a task agent's commit).
+// Override with KANBAN_WORKSPACE_METADATA_POLL_MS for per-deployment tuning.
+const DEFAULT_WORKSPACE_METADATA_POLL_INTERVAL_MS = 15_000;
 const MIN_WORKSPACE_METADATA_POLL_INTERVAL_MS = 500;
+const GIT_FS_WATCH_DEBOUNCE_MS = 200;
 
 function resolveWorkspaceMetadataPollIntervalMs(): number {
 	const raw = process.env.KANBAN_WORKSPACE_METADATA_POLL_MS;
@@ -56,6 +62,9 @@ interface WorkspaceMetadataEntry {
 	refreshPromise: Promise<RuntimeWorkspaceMetadata> | null;
 	homeGit: CachedHomeGitMetadata;
 	taskMetadataByTaskId: Map<string, CachedTaskWorkspaceMetadata>;
+	gitHeadWatcher: FSWatcher | null;
+	gitIndexWatcher: FSWatcher | null;
+	fsWatchDebounceTimer: NodeJS.Timeout | null;
 }
 
 export interface CreateWorkspaceMetadataMonitorDependencies {
@@ -173,6 +182,9 @@ function createWorkspaceEntry(workspacePath: string): WorkspaceMetadataEntry {
 			stateVersion: 0,
 		},
 		taskMetadataByTaskId: new Map<string, CachedTaskWorkspaceMetadata>(),
+		gitHeadWatcher: null,
+		gitIndexWatcher: null,
+		fsWatchDebounceTimer: null,
 	};
 }
 
@@ -297,6 +309,7 @@ export function createWorkspaceMetadataMonitor(
 	const workspaces = new Map<string, WorkspaceMetadataEntry>();
 
 	const stopWorkspaceTimer = (entry: WorkspaceMetadataEntry) => {
+		stopGitFsWatchers(entry);
 		if (!entry.pollTimer) {
 			return;
 		}
@@ -310,6 +323,63 @@ export function createWorkspaceMetadataMonitor(
 		}
 		clearTimeout(entry.idleDisposeTimer);
 		entry.idleDisposeTimer = null;
+	};
+
+	const stopGitFsWatchers = (entry: WorkspaceMetadataEntry) => {
+		if (entry.fsWatchDebounceTimer) {
+			clearTimeout(entry.fsWatchDebounceTimer);
+			entry.fsWatchDebounceTimer = null;
+		}
+		if (entry.gitHeadWatcher) {
+			try {
+				entry.gitHeadWatcher.close();
+			} catch {
+				// Ignore close errors; node fs.watch throws if already closed.
+			}
+			entry.gitHeadWatcher = null;
+		}
+		if (entry.gitIndexWatcher) {
+			try {
+				entry.gitIndexWatcher.close();
+			} catch {
+				// Ignore close errors.
+			}
+			entry.gitIndexWatcher = null;
+		}
+	};
+
+	const startGitFsWatchers = (workspaceId: string, entry: WorkspaceMetadataEntry) => {
+		if (entry.gitHeadWatcher || entry.gitIndexWatcher) {
+			return;
+		}
+		const scheduleDebouncedRefresh = () => {
+			if (entry.fsWatchDebounceTimer) {
+				return;
+			}
+			const timer = setTimeout(() => {
+				entry.fsWatchDebounceTimer = null;
+				void refreshWorkspace(workspaceId);
+			}, GIT_FS_WATCH_DEBOUNCE_MS);
+			timer.unref();
+			entry.fsWatchDebounceTimer = timer;
+		};
+		const watchPath = (relative: string): FSWatcher | null => {
+			try {
+				const absolute = join(entry.workspacePath, ".git", relative);
+				const watcher = watch(absolute, { persistent: false }, () => {
+					scheduleDebouncedRefresh();
+				});
+				watcher.on("error", () => {
+					// A missing file (new clone, submodule, detached worktree)
+					// surfaces as an error; ignore and rely on the poll fallback.
+				});
+				return watcher;
+			} catch {
+				return null;
+			}
+		};
+		entry.gitHeadWatcher = watchPath("HEAD");
+		entry.gitIndexWatcher = watchPath("index");
 	};
 
 	const refreshWorkspace = async (workspaceId: string): Promise<RuntimeWorkspaceMetadata> => {
@@ -368,6 +438,7 @@ export function createWorkspaceMetadataMonitor(
 	};
 
 	const ensureWorkspaceTimer = (workspaceId: string, entry: WorkspaceMetadataEntry) => {
+		startGitFsWatchers(workspaceId, entry);
 		if (entry.pollTimer) {
 			return;
 		}
