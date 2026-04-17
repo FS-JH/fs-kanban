@@ -6,6 +6,7 @@ import type {
 	RuntimeBoardDependency,
 	RuntimeExternalTaskSource,
 	RuntimeExternalTaskSourceInput,
+	RuntimeTaskAttachment,
 	RuntimeTaskAutoReviewMode,
 	RuntimeTaskImage,
 } from "./api-contract.js";
@@ -16,6 +17,7 @@ export interface RuntimeCreateTaskInput {
 	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: RuntimeTaskAutoReviewMode;
+	attachments?: RuntimeTaskAttachment[];
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId;
 	fallbackAgentId?: RuntimeAgentId | null;
@@ -28,6 +30,7 @@ export interface RuntimeUpdateTaskInput {
 	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: RuntimeTaskAutoReviewMode;
+	attachments?: RuntimeTaskAttachment[];
 	images?: RuntimeTaskImage[];
 	agentId?: RuntimeAgentId;
 	fallbackAgentId?: RuntimeAgentId | null;
@@ -51,9 +54,44 @@ function normalizeTaskAutoReviewMode(value: RuntimeTaskAutoReviewMode | null | u
 	return "commit";
 }
 
-// Copy image metadata so board tasks do not retain caller-owned array or object references.
+// Copy attachment metadata so board tasks do not retain caller-owned array or object references.
+function cloneTaskAttachments(attachments?: RuntimeTaskAttachment[]): RuntimeTaskAttachment[] | undefined {
+	return attachments && attachments.length > 0 ? attachments.map((attachment) => ({ ...attachment })) : undefined;
+}
+
 function cloneTaskImages(images?: RuntimeTaskImage[]): RuntimeTaskImage[] | undefined {
 	return images && images.length > 0 ? images.map((image) => ({ ...image })) : undefined;
+}
+
+function detectAttachmentKindFromImage(image: RuntimeTaskImage): RuntimeTaskAttachment["kind"] {
+	const normalizedMimeType = image.mimeType.trim().toLowerCase();
+	if (normalizedMimeType.startsWith("image/")) {
+		return "image";
+	}
+	return "other";
+}
+
+function estimateInlineImageSizeBytes(data: string): number {
+	const normalized = data.trim();
+	if (!normalized) {
+		return 0;
+	}
+	const paddingLength = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
+	return Math.max(0, Math.floor((normalized.length * 3) / 4) - paddingLength);
+}
+
+function attachmentsFromImages(images?: RuntimeTaskImage[]): RuntimeTaskAttachment[] | undefined {
+	if (!images || images.length === 0) {
+		return undefined;
+	}
+	return images.map((image, index) => ({
+		id: image.id,
+		kind: detectAttachmentKindFromImage(image),
+		name: image.name?.trim() || `image-${index + 1}`,
+		mimeType: image.mimeType,
+		sizeBytes: estimateInlineImageSizeBytes(image.data),
+		storageKey: "",
+	}));
 }
 
 function normalizeTaskAgentId(agentId: RuntimeAgentId | null | undefined): RuntimeAgentId | undefined {
@@ -388,12 +426,14 @@ export function addTaskToColumn(
 	}
 	const existingIds = collectExistingTaskIds(board);
 	const agentId = normalizeTaskAgentId(input.agentId);
+	const attachments = input.attachments ?? attachmentsFromImages(input.images);
 	const task: RuntimeBoardCard = {
 		id: createUniqueTaskId(existingIds, randomUuid),
 		prompt,
 		startInPlanMode: Boolean(input.startInPlanMode),
 		autoReviewEnabled: Boolean(input.autoReviewEnabled),
 		autoReviewMode: normalizeTaskAutoReviewMode(input.autoReviewMode),
+		attachments: cloneTaskAttachments(attachments),
 		images: cloneTaskImages(input.images),
 		agentId,
 		fallbackAgentId: normalizeTaskFallbackAgentId(input.fallbackAgentId, agentId),
@@ -705,12 +745,14 @@ export function updateTask(
 			}
 			columnUpdated = true;
 			const preferredAgentId = normalizeTaskAgentId(input.agentId);
+			const attachments = input.attachments ?? (input.images === undefined ? undefined : attachmentsFromImages(input.images));
 			updatedTask = {
 				...card,
 				prompt,
 				startInPlanMode: Boolean(input.startInPlanMode),
 				autoReviewEnabled: Boolean(input.autoReviewEnabled),
 				autoReviewMode: normalizeTaskAutoReviewMode(input.autoReviewMode),
+				attachments: attachments === undefined ? card.attachments : cloneTaskAttachments(attachments),
 				images: input.images === undefined ? card.images : cloneTaskImages(input.images),
 				agentId: preferredAgentId,
 				fallbackAgentId:
@@ -819,6 +861,7 @@ export function upsertBacklogTaskByExternalSource(
 			startInPlanMode: nextStartInPlanMode,
 			autoReviewEnabled: nextAutoReviewEnabled,
 			autoReviewMode: nextAutoReviewMode,
+			attachments: existing.task.attachments,
 			images: existing.task.images,
 			agentId: existing.task.agentId,
 			fallbackAgentId: existing.task.fallbackAgentId,

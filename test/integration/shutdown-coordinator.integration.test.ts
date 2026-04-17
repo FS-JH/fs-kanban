@@ -2,11 +2,17 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+import * as lockfile from "proper-lockfile";
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeBoardData, RuntimeTaskSessionSummary } from "../../src/core/api-contract.js";
 import { shutdownRuntimeServer } from "../../src/server/shutdown-coordinator.js";
-import { loadWorkspaceState, saveWorkspaceState } from "../../src/state/workspace-state.js";
+import {
+	getWorkspacesRootPath,
+	loadWorkspaceContext,
+	loadWorkspaceState,
+	saveWorkspaceState,
+} from "../../src/state/workspace-state.js";
 import type { TerminalSessionManager } from "../../src/terminal/session-manager.js";
 import { createGitTestEnv } from "../utilities/git-env.js";
 import { createTempDir } from "../utilities/temp-dir.js";
@@ -195,4 +201,96 @@ describe.sequential("shutdown coordinator integration", () => {
 		},
 		30_000,
 	);
+
+	it("completes shutdown cleanup even while the workspace index lock is held", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-shutdown-lock-bypass-");
+			try {
+				const managedProjectPath = join(sandboxRoot, "managed-project");
+				const indexedProjectPath = join(sandboxRoot, "indexed-project");
+				mkdirSync(managedProjectPath, { recursive: true });
+				mkdirSync(indexedProjectPath, { recursive: true });
+				initGitRepository(managedProjectPath);
+				initGitRepository(indexedProjectPath);
+
+				const managedInitial = await loadWorkspaceState(managedProjectPath);
+				await saveWorkspaceState(managedProjectPath, {
+					board: createBoard({
+						inProgress: ["managed-running"],
+					}),
+					sessions: {
+						"managed-running": createSession("managed-running", "running"),
+					},
+					expectedRevision: managedInitial.revision,
+				});
+
+				const indexedInitial = await loadWorkspaceState(indexedProjectPath);
+				await saveWorkspaceState(indexedProjectPath, {
+					board: createBoard({
+						review: ["indexed-awaiting-review"],
+					}),
+					sessions: {
+						"indexed-awaiting-review": createSession("indexed-awaiting-review", "awaiting_review"),
+					},
+					expectedRevision: indexedInitial.revision,
+				});
+				const managedContext = await loadWorkspaceContext(managedProjectPath);
+
+				const indexPath = join(getWorkspacesRootPath(), "index.json");
+				const release = await lockfile.lock(indexPath, {
+					realpath: false,
+					lockfilePath: `${indexPath}.lock`,
+					stale: 10_000,
+					retries: {
+						retries: 0,
+					},
+				});
+
+				try {
+					let didCloseRuntimeServer = false;
+					const managedTerminalManager = {
+						markInterruptedAndStopAll: () => [createSession("managed-running", "running")],
+						listSummaries: () => [createSession("managed-running", "running")],
+						getSummary: (taskId: string) => {
+							if (taskId === "managed-running") {
+								return createSession("managed-running", "running");
+							}
+							return null;
+						},
+					} as unknown as TerminalSessionManager;
+
+					const startedAt = Date.now();
+					await shutdownRuntimeServer({
+						workspaceRegistry: {
+							listManagedWorkspaces: () => [
+								{
+									workspaceId: managedContext.workspaceId,
+									workspacePath: managedProjectPath,
+									terminalManager: managedTerminalManager,
+								},
+							],
+						},
+						warn: () => {},
+						closeRuntimeServer: async () => {
+							didCloseRuntimeServer = true;
+						},
+					});
+					const elapsedMs = Date.now() - startedAt;
+
+					expect(didCloseRuntimeServer).toBe(true);
+					expect(elapsedMs).toBeLessThan(2_000);
+				} finally {
+					await release();
+				}
+
+				const managedAfter = await loadWorkspaceState(managedProjectPath);
+				expect(managedAfter.sessions["managed-running"]?.state).toBe("interrupted");
+
+				const indexedAfter = await loadWorkspaceState(indexedProjectPath);
+				expect(indexedAfter.sessions["indexed-awaiting-review"]?.state).toBe("interrupted");
+			} finally {
+				cleanup();
+			}
+		});
+	});
 });

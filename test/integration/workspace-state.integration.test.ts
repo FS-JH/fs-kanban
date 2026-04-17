@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import * as lockfile from "proper-lockfile";
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeBoardData, RuntimeTaskSessionSummary } from "../../src/core/api-contract.js";
@@ -13,8 +14,10 @@ import {
 	loadWorkspaceContextById,
 	loadWorkspaceSessionReplayHistoryById,
 	loadWorkspaceState,
+	loadWorkspaceStateById,
 	removeWorkspaceIndexEntry,
 	saveWorkspaceState,
+	saveWorkspaceStateById,
 	saveWorkspaceTaskReplayHistoryById,
 } from "../../src/state/workspace-state.js";
 import { createGitTestEnv } from "../utilities/git-env.js";
@@ -172,6 +175,119 @@ describe.sequential("workspace-state integration", () => {
 				const entriesAfterRemoval = await listWorkspaceIndexEntries();
 				expect(entriesAfterRemoval).toHaveLength(1);
 				expect(entriesAfterRemoval[0]?.workspaceId).toBe(contextB.workspaceId);
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("loads workspace context by id without waiting on the index lock", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspace-lock-bypass-");
+			try {
+				const workspacePath = join(sandboxRoot, "alpha");
+				mkdirSync(workspacePath, { recursive: true });
+				initGitRepository(workspacePath);
+
+				const context = await loadWorkspaceContext(workspacePath);
+				const indexPath = join(getWorkspacesRootPath(), "index.json");
+				const release = await lockfile.lock(indexPath, {
+					realpath: false,
+					lockfilePath: `${indexPath}.lock`,
+					stale: 10_000,
+					retries: {
+						retries: 0,
+					},
+				});
+
+				try {
+					const startedAt = Date.now();
+					const loaded = await loadWorkspaceContextById(context.workspaceId);
+					const elapsedMs = Date.now() - startedAt;
+
+					expect(loaded?.workspaceId).toBe(context.workspaceId);
+					expect(loaded?.repoPath).toBe(context.repoPath);
+					expect(elapsedMs).toBeLessThan(2_000);
+				} finally {
+					await release();
+				}
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("loads workspace state by id without waiting on the index lock", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspace-state-lock-bypass-");
+			try {
+				const workspacePath = join(sandboxRoot, "alpha");
+				mkdirSync(workspacePath, { recursive: true });
+				initGitRepository(workspacePath);
+
+				const context = await loadWorkspaceContext(workspacePath);
+				const indexPath = join(getWorkspacesRootPath(), "index.json");
+				const release = await lockfile.lock(indexPath, {
+					realpath: false,
+					lockfilePath: `${indexPath}.lock`,
+					stale: 10_000,
+					retries: {
+						retries: 0,
+					},
+				});
+
+				try {
+					const startedAt = Date.now();
+					const loaded = await loadWorkspaceStateById(context.workspaceId, context.repoPath);
+					const elapsedMs = Date.now() - startedAt;
+
+					expect(loaded.repoPath).toBe(context.repoPath);
+					expect(loaded.board.columns).toHaveLength(4);
+					expect(elapsedMs).toBeLessThan(2_000);
+				} finally {
+					await release();
+				}
+			} finally {
+				cleanup();
+			}
+		});
+	});
+
+	it("saves workspace state by id without waiting on the index lock", async () => {
+		await withTemporaryHome(async () => {
+			const { path: sandboxRoot, cleanup } = createTempDir("kanban-workspace-state-save-lock-bypass-");
+			try {
+				const workspacePath = join(sandboxRoot, "alpha");
+				mkdirSync(workspacePath, { recursive: true });
+				initGitRepository(workspacePath);
+
+				const context = await loadWorkspaceContext(workspacePath);
+				const initial = await loadWorkspaceStateById(context.workspaceId, context.repoPath);
+				const indexPath = join(getWorkspacesRootPath(), "index.json");
+				const release = await lockfile.lock(indexPath, {
+					realpath: false,
+					lockfilePath: `${indexPath}.lock`,
+					stale: 10_000,
+					retries: {
+						retries: 0,
+					},
+				});
+
+				try {
+					const startedAt = Date.now();
+					const saved = await saveWorkspaceStateById(context.workspaceId, context.repoPath, {
+						board: createBoard("Saved without index lock"),
+						sessions: {},
+						expectedRevision: initial.revision,
+					});
+					const elapsedMs = Date.now() - startedAt;
+
+					expect(saved.revision).toBe(initial.revision + 1);
+					expect(saved.board.columns[0]?.cards[0]?.prompt).toBe("Saved without index lock");
+					expect(elapsedMs).toBeLessThan(2_000);
+				} finally {
+					await release();
+				}
 			} finally {
 				cleanup();
 			}

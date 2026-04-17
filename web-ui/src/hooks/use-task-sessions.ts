@@ -141,6 +141,7 @@ export function useTaskSessions({
 				const payload = await trpcClient.runtime.startTaskSession.mutate({
 					taskId: task.id,
 					prompt: kickoffPrompt,
+					attachments: options?.resumeFromTrash ? undefined : task.attachments,
 					images: options?.resumeFromTrash ? undefined : task.images,
 					startInPlanMode: options?.resumeFromTrash ? undefined : task.startInPlanMode,
 					resumeFromTrash: options?.resumeFromTrash,

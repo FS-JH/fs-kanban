@@ -20,7 +20,7 @@ import {
 	parseWorktreeEnsureRequest,
 } from "../core/api-validation.js";
 import { findTaskByExternalSource, upsertBacklogTaskByExternalSource } from "../core/task-board-mutations.js";
-import { saveWorkspaceState, WorkspaceStateConflictError } from "../state/workspace-state.js";
+import { saveWorkspaceStateById, WorkspaceStateConflictError } from "../state/workspace-state.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
 import {
 	createEmptyWorkspaceChangesResponse,
@@ -366,7 +366,11 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 					workspaceScope.workspacePath,
 				);
 				input.sessions = mergeLiveTaskSessions(input.sessions, terminalManager);
-				const response = await saveWorkspaceState(workspaceScope.workspacePath, input);
+				const response = await saveWorkspaceStateById(
+					workspaceScope.workspaceId,
+					workspaceScope.workspacePath,
+					input,
+				);
 				void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceScope.workspaceId, workspaceScope.workspacePath);
 				void deps.broadcastRuntimeProjectsUpdated(workspaceScope.workspaceId);
 				return response;
@@ -422,7 +426,7 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 					workspaceScope.workspaceId,
 					workspaceScope.workspacePath,
 				);
-				await saveWorkspaceState(workspaceScope.workspacePath, {
+				await saveWorkspaceStateById(workspaceScope.workspaceId, workspaceScope.workspacePath, {
 					board: nextBoard,
 					sessions: mergeLiveTaskSessions(workspaceState.sessions, terminalManager),
 					expectedRevision: workspaceState.revision,

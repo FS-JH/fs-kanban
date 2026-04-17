@@ -82,13 +82,85 @@ export type RuntimeBoardColumnId = z.infer<typeof runtimeBoardColumnIdSchema>;
 export const runtimeTaskAutoReviewModeSchema = z.enum(["commit", "pr", "move_to_trash"]);
 export type RuntimeTaskAutoReviewMode = z.infer<typeof runtimeTaskAutoReviewModeSchema>;
 
-export const runtimeTaskImageSchema = z.object({
+const runtimeLegacyTaskImageSchema = z.object({
 	id: z.string(),
 	data: z.string(),
 	mimeType: z.string(),
 	name: z.string().optional(),
 });
+export const runtimeTaskImageSchema = runtimeLegacyTaskImageSchema;
 export type RuntimeTaskImage = z.infer<typeof runtimeTaskImageSchema>;
+
+export const runtimeTaskAttachmentKindSchema = z.enum(["image", "document", "text", "data", "other"]);
+export type RuntimeTaskAttachmentKind = z.infer<typeof runtimeTaskAttachmentKindSchema>;
+
+export const runtimeTaskAttachmentSchema = z.object({
+	id: z.string(),
+	kind: runtimeTaskAttachmentKindSchema,
+	name: z.string(),
+	mimeType: z.string(),
+	sizeBytes: z.number().int().nonnegative(),
+	storageKey: z.string(),
+});
+export type RuntimeTaskAttachment = z.infer<typeof runtimeTaskAttachmentSchema>;
+
+function detectLegacyTaskImageAttachmentKind(mimeType: string): RuntimeTaskAttachmentKind {
+	const normalizedMimeType = mimeType.trim().toLowerCase();
+	if (normalizedMimeType.startsWith("image/")) {
+		return "image";
+	}
+	if (
+		normalizedMimeType.startsWith("text/") ||
+		normalizedMimeType === "application/json" ||
+		normalizedMimeType === "application/xml"
+	) {
+		return "text";
+	}
+	if (
+		normalizedMimeType === "application/pdf" ||
+		normalizedMimeType.includes("wordprocessingml") ||
+		normalizedMimeType.includes("msword")
+	) {
+		return "document";
+	}
+	if (
+		normalizedMimeType.includes("csv") ||
+		normalizedMimeType.includes("spreadsheet") ||
+		normalizedMimeType.includes("excel")
+	) {
+		return "data";
+	}
+	return "other";
+}
+
+function estimateLegacyBase64SizeBytes(data: string): number {
+	const normalized = data.trim();
+	if (!normalized) {
+		return 0;
+	}
+	const paddingLength = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
+	return Math.max(0, Math.floor((normalized.length * 3) / 4) - paddingLength);
+}
+
+function normalizeTaskAttachments(
+	attachments: RuntimeTaskAttachment[] | undefined,
+	legacyImages?: RuntimeTaskImage[],
+): RuntimeTaskAttachment[] | undefined {
+	if (attachments && attachments.length > 0) {
+		return attachments;
+	}
+	if (!legacyImages || legacyImages.length === 0) {
+		return undefined;
+	}
+	return legacyImages.map((image, index) => ({
+		id: image.id,
+		kind: detectLegacyTaskImageAttachmentKind(image.mimeType),
+		name: image.name?.trim() || `image-${index + 1}`,
+		mimeType: image.mimeType,
+		sizeBytes: estimateLegacyBase64SizeBytes(image.data),
+		storageKey: "",
+	}));
+}
 
 export const runtimeExternalTaskSourceProviderSchema = z.enum(["notion"]);
 export type RuntimeExternalTaskSourceProvider = z.infer<typeof runtimeExternalTaskSourceProviderSchema>;
@@ -112,20 +184,30 @@ export const runtimeExternalTaskSourceInputSchema = runtimeExternalTaskSourceSch
 });
 export type RuntimeExternalTaskSourceInput = z.infer<typeof runtimeExternalTaskSourceInputSchema>;
 
-export const runtimeBoardCardSchema = z.object({
-	id: z.string(),
-	prompt: z.string(),
-	startInPlanMode: z.boolean(),
-	autoReviewEnabled: z.boolean().optional(),
-	autoReviewMode: runtimeTaskAutoReviewModeSchema.optional(),
-	images: z.array(runtimeTaskImageSchema).optional(),
-	agentId: runtimeAgentIdSchema.optional(),
-	fallbackAgentId: runtimeAgentIdSchema.nullable().optional(),
-	externalSource: runtimeExternalTaskSourceSchema.optional(),
-	baseRef: z.string(),
-	createdAt: z.number(),
-	updatedAt: z.number(),
-});
+export const runtimeBoardCardSchema = z
+	.object({
+		id: z.string(),
+		prompt: z.string(),
+		startInPlanMode: z.boolean(),
+		autoReviewEnabled: z.boolean().optional(),
+		autoReviewMode: runtimeTaskAutoReviewModeSchema.optional(),
+		attachments: z.array(runtimeTaskAttachmentSchema).optional(),
+		images: z.array(runtimeLegacyTaskImageSchema).optional(),
+		agentId: runtimeAgentIdSchema.optional(),
+		fallbackAgentId: runtimeAgentIdSchema.nullable().optional(),
+		externalSource: runtimeExternalTaskSourceSchema.optional(),
+		baseRef: z.string(),
+		createdAt: z.number(),
+		updatedAt: z.number(),
+	})
+	.transform(({ attachments, images, ...card }) => {
+		const normalizedAttachments = normalizeTaskAttachments(attachments, images);
+		return {
+			...card,
+			...(normalizedAttachments ? { attachments: normalizedAttachments } : {}),
+			...(images ? { images } : {}),
+		};
+	});
 export type RuntimeBoardCard = z.infer<typeof runtimeBoardCardSchema>;
 
 export const runtimeBoardColumnSchema = z.object({
@@ -666,18 +748,42 @@ export const runtimeConfigSaveRequestSchema = z.object({
 });
 export type RuntimeConfigSaveRequest = z.infer<typeof runtimeConfigSaveRequestSchema>;
 
-export const runtimeTaskSessionStartRequestSchema = z.object({
-	taskId: z.string(),
-	prompt: z.string(),
-	images: z.array(runtimeTaskImageSchema).optional(),
-	startInPlanMode: z.boolean().optional(),
-	mode: runtimeTaskSessionModeSchema.optional(),
-	resumeFromTrash: z.boolean().optional(),
-	agentId: runtimeAgentIdSchema.optional(),
-	baseRef: z.string(),
-	cols: z.number().int().positive().optional(),
-	rows: z.number().int().positive().optional(),
+export const runtimeTaskAttachmentUploadRequestSchema = z.object({
+	name: z.string().min(1),
+	mimeType: z.string().min(1),
+	dataBase64: z.string().min(1),
 });
+export type RuntimeTaskAttachmentUploadRequest = z.infer<typeof runtimeTaskAttachmentUploadRequestSchema>;
+
+export const runtimeTaskAttachmentUploadResponseSchema = z.object({
+	ok: z.boolean(),
+	attachment: runtimeTaskAttachmentSchema.nullable(),
+	error: z.string().optional(),
+});
+export type RuntimeTaskAttachmentUploadResponse = z.infer<typeof runtimeTaskAttachmentUploadResponseSchema>;
+
+export const runtimeTaskSessionStartRequestSchema = z
+	.object({
+		taskId: z.string(),
+		prompt: z.string(),
+		attachments: z.array(runtimeTaskAttachmentSchema).optional(),
+		images: z.array(runtimeLegacyTaskImageSchema).optional(),
+		startInPlanMode: z.boolean().optional(),
+		mode: runtimeTaskSessionModeSchema.optional(),
+		resumeFromTrash: z.boolean().optional(),
+		agentId: runtimeAgentIdSchema.optional(),
+		baseRef: z.string(),
+		cols: z.number().int().positive().optional(),
+		rows: z.number().int().positive().optional(),
+	})
+	.transform(({ attachments, images, ...request }) => {
+		const normalizedAttachments = normalizeTaskAttachments(attachments, images);
+		return {
+			...request,
+			...(normalizedAttachments ? { attachments: normalizedAttachments } : {}),
+			...(images ? { images } : {}),
+		};
+	});
 export type RuntimeTaskSessionStartRequest = z.infer<typeof runtimeTaskSessionStartRequestSchema>;
 
 export const runtimeTaskSessionStartResponseSchema = z.object({

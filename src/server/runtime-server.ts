@@ -1,16 +1,20 @@
 import { readFile } from "node:fs/promises";
 import {
 	createServer as createHttpServer,
-	type IncomingMessage,
 	type Server as HttpServer,
+	type IncomingMessage,
 	type ServerResponse,
 } from "node:http";
 import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
 import { join } from "node:path";
-import packageJson from "../../package.json" with { type: "json" };
-
 import { createHTTPHandler } from "@trpc/server/adapters/standalone";
-import type { RuntimeCommandRunResponse, RuntimeWorkspaceStateResponse } from "../core/api-contract.js";
+import packageJson from "../../package.json" with { type: "json" };
+import {
+	type RuntimeCommandRunResponse,
+	type RuntimeTaskAttachment,
+	type RuntimeWorkspaceStateResponse,
+	runtimeTaskAttachmentUploadRequestSchema,
+} from "../core/api-contract.js";
 import {
 	buildKanbanRuntimeUrl,
 	getKanbanRuntimeHost,
@@ -21,7 +25,11 @@ import {
 	getKanbanRuntimeTlsKeyPath,
 	isKanbanRuntimeHttpsEnabled,
 } from "../core/runtime-endpoint.js";
-import { loadWorkspaceContextById } from "../state/workspace-state.js";
+import {
+	getWorkspaceDirectoryPath,
+	loadWorkspaceContextById,
+	loadWorkspaceStateById,
+} from "../state/workspace-state.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
 import { createTerminalWebSocketBridge } from "../terminal/ws-server.js";
 import { type RuntimeTrpcContext, type RuntimeTrpcWorkspaceScope, runtimeAppRouter } from "../trpc/app-router.js";
@@ -29,6 +37,14 @@ import { createHooksApi } from "../trpc/hooks-api.js";
 import { createProjectsApi } from "../trpc/projects-api.js";
 import { createRuntimeApi } from "../trpc/runtime-api.js";
 import { createWorkspaceApi } from "../trpc/workspace-api.js";
+import {
+	collectBoardAttachmentStorageKeys,
+	getTaskAttachmentsRootPath,
+	lookupTaskAttachmentContentType,
+	pruneStaleUnreferencedTaskAttachments,
+	resolveExistingStoredTaskAttachmentPath,
+	storeTaskAttachment,
+} from "../workspace/task-attachments.js";
 import { getWebUiDir, normalizeRequestPath, readAsset } from "./assets.js";
 import type { RuntimeStateHub } from "./runtime-state-hub.js";
 import type { WorkspaceRegistry } from "./workspace-registry.js";
@@ -67,6 +83,8 @@ export interface RuntimeServer {
 
 type RuntimeHttpServer = HttpServer | HttpsServer;
 
+const MAX_ATTACHMENT_UPLOAD_BODY_BYTES = 35 * 1024 * 1024;
+
 function readWorkspaceIdFromRequest(request: IncomingMessage, requestUrl: URL): string | null {
 	const headerValue = request.headers["x-kanban-workspace-id"];
 	const headerWorkspaceId = Array.isArray(headerValue) ? headerValue[0] : headerValue;
@@ -81,6 +99,54 @@ function readWorkspaceIdFromRequest(request: IncomingMessage, requestUrl: URL): 
 		const normalized = queryWorkspaceId.trim();
 		if (normalized) {
 			return normalized;
+		}
+	}
+	return null;
+}
+
+function writeJsonResponse(response: ServerResponse<IncomingMessage>, statusCode: number, payload: unknown): void {
+	response.writeHead(statusCode, {
+		"Content-Type": "application/json; charset=utf-8",
+		"Cache-Control": "no-store",
+	});
+	response.end(JSON.stringify(payload));
+}
+
+async function readJsonRequestBody(
+	request: IncomingMessage,
+	maxBytes: number = MAX_ATTACHMENT_UPLOAD_BODY_BYTES,
+): Promise<unknown> {
+	const chunks: Buffer[] = [];
+	let totalBytes = 0;
+	for await (const chunk of request) {
+		const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+		totalBytes += bufferChunk.byteLength;
+		if (totalBytes > maxBytes) {
+			throw new Error("Request body exceeds the maximum supported size.");
+		}
+		chunks.push(bufferChunk);
+	}
+	if (chunks.length === 0) {
+		throw new Error("Request body cannot be empty.");
+	}
+	try {
+		return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+	} catch {
+		throw new Error("Request body must be valid JSON.");
+	}
+}
+
+function findTaskAttachmentByStorageKey(
+	board: RuntimeWorkspaceStateResponse["board"],
+	storageKey: string,
+): RuntimeTaskAttachment | null {
+	for (const column of board.columns) {
+		for (const card of column.cards) {
+			for (const attachment of card.attachments ?? []) {
+				if (attachment.storageKey === storageKey) {
+					return attachment;
+				}
+			}
 		}
 	}
 	return null;
@@ -208,23 +274,116 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 				await trpcHttpHandler(req, res);
 				return;
 			}
+			if (pathname === "/api/attachments/upload") {
+				if (req.method !== "POST") {
+					writeJsonResponse(res, 405, { ok: false, error: "Method not allowed." });
+					return;
+				}
+				const scope = await resolveWorkspaceScopeFromRequest(req, requestUrl);
+				if (!scope.workspaceScope) {
+					writeJsonResponse(res, scope.requestedWorkspaceId ? 404 : 400, {
+						ok: false,
+						error: scope.requestedWorkspaceId ? "Workspace not found." : "Missing workspaceId.",
+					});
+					return;
+				}
+
+				let requestBody: unknown;
+				try {
+					requestBody = await readJsonRequestBody(req);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					writeJsonResponse(res, 400, { ok: false, error: message });
+					return;
+				}
+
+				const parsedUpload = runtimeTaskAttachmentUploadRequestSchema.safeParse(requestBody);
+				if (!parsedUpload.success) {
+					writeJsonResponse(res, 400, {
+						ok: false,
+						error: parsedUpload.error.issues[0]?.message ?? "Invalid attachment upload payload.",
+					});
+					return;
+				}
+
+				try {
+					const workspaceId = scope.workspaceScope.workspaceId;
+					const repoPath = scope.workspaceScope.workspacePath;
+					const attachmentsRootPath = getTaskAttachmentsRootPath(getWorkspaceDirectoryPath(workspaceId));
+					const attachment = await storeTaskAttachment(attachmentsRootPath, parsedUpload.data);
+					const currentState = await loadWorkspaceStateById(workspaceId, repoPath);
+					await pruneStaleUnreferencedTaskAttachments(
+						attachmentsRootPath,
+						collectBoardAttachmentStorageKeys(currentState.board),
+					);
+					writeJsonResponse(res, 200, {
+						ok: true,
+						attachment,
+					});
+					return;
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					writeJsonResponse(res, 400, { ok: false, error: message });
+					return;
+				}
+			}
+			if (pathname === "/api/attachments/file") {
+				if (req.method !== "GET") {
+					writeJsonResponse(res, 405, { ok: false, error: "Method not allowed." });
+					return;
+				}
+				const storageKey = requestUrl.searchParams.get("storageKey")?.trim() ?? "";
+				if (!storageKey) {
+					writeJsonResponse(res, 400, { ok: false, error: "Missing storageKey." });
+					return;
+				}
+				const scope = await resolveWorkspaceScopeFromRequest(req, requestUrl);
+				if (!scope.workspaceScope) {
+					writeJsonResponse(res, scope.requestedWorkspaceId ? 404 : 400, {
+						ok: false,
+						error: scope.requestedWorkspaceId ? "Workspace not found." : "Missing workspaceId.",
+					});
+					return;
+				}
+				try {
+					const workspaceId = scope.workspaceScope.workspaceId;
+					const repoPath = scope.workspaceScope.workspacePath;
+					const attachmentsRootPath = getTaskAttachmentsRootPath(getWorkspaceDirectoryPath(workspaceId));
+					const filePath = await resolveExistingStoredTaskAttachmentPath(attachmentsRootPath, storageKey);
+					if (!filePath) {
+						writeJsonResponse(res, 404, { ok: false, error: "Attachment not found." });
+						return;
+					}
+					const currentState = await loadWorkspaceStateById(workspaceId, repoPath);
+					const attachment = findTaskAttachmentByStorageKey(currentState.board, storageKey);
+					const content = await readFile(filePath);
+					res.writeHead(200, {
+						"Content-Type": lookupTaskAttachmentContentType(
+							attachment ?? {
+								mimeType: "",
+								name: storageKey,
+							},
+						),
+						"Cache-Control": "no-store",
+					});
+					res.end(content);
+					return;
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					writeJsonResponse(res, 400, { ok: false, error: message });
+					return;
+				}
+			}
 			if (pathname === "/api/health") {
-				res.writeHead(200, {
-					"Content-Type": "application/json; charset=utf-8",
-					"Cache-Control": "no-store",
+				writeJsonResponse(res, 200, {
+					status: "ok",
+					version: KANBAN_VERSION,
+					uptime: process.uptime(),
 				});
-				res.end(
-					JSON.stringify({
-						status: "ok",
-						version: KANBAN_VERSION,
-						uptime: process.uptime(),
-					}),
-				);
 				return;
 			}
 			if (pathname.startsWith("/api/")) {
-				res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
-				res.end('{"error":"Not found"}');
+				writeJsonResponse(res, 404, { error: "Not found" });
 				return;
 			}
 
@@ -241,6 +400,21 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 	};
 
 	const httpServer = createHttpServer(requestHandler);
+	// Tolerate misbehaving clients that open TCP connections and abort the
+	// request mid-flight without closing the socket. Without these timeouts a
+	// leaky client (e.g. the Foundation EA dashboard observed in production
+	// leaving ~100 ESTABLISHED connections to port 3484) can back up the HTTP
+	// server until /api/health times out.
+	//
+	// headersTimeout (10s): close connections that do not finish sending
+	// headers in time. Node's default is 60s, far too long for localhost.
+	// requestTimeout (30s): close connections that do not finish the full
+	// request body in time.
+	// keepAliveTimeout (5s): idle keep-alive connections drop after 5s so a
+	// burst of opened-but-unused sockets cannot exhaust resources.
+	httpServer.headersTimeout = 10_000;
+	httpServer.requestTimeout = 30_000;
+	httpServer.keepAliveTimeout = 5_000;
 	const servers: RuntimeHttpServer[] = [httpServer];
 
 	if (isKanbanRuntimeHttpsEnabled()) {
@@ -251,6 +425,9 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 		}
 		const [cert, key] = await Promise.all([readFile(tlsCertPath), readFile(tlsKeyPath)]);
 		const httpsServer = createHttpsServer({ cert, key }, requestHandler);
+		httpsServer.headersTimeout = 10_000;
+		httpsServer.requestTimeout = 30_000;
+		httpsServer.keepAliveTimeout = 5_000;
 		servers.push(httpsServer);
 	}
 
