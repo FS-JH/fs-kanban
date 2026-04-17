@@ -1,15 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { LockOptions } from "proper-lockfile";
 import * as lockfile from "proper-lockfile";
 
-const DEFAULT_LOCK_STALE_MS = 10_000;
+// 30s stale threshold tolerates event-loop stalls under heavy load (polling,
+// burst of git subprocess work). 10s was too tight and caused ECOMPROMISED
+// errors when proper-lockfile could not touch the lockfile in time.
+const DEFAULT_LOCK_STALE_MS = 30_000;
+
+// Retry window must exceed the stale threshold so that a new process started
+// immediately after an abrupt prior-process death can acquire the lock once it
+// ages past the stale cutoff. 600 × (50-100ms) gives us a ~30-60s window;
+// before, 200 × (25-50ms) gave 5-10s, frequently shorter than stale, so pm2
+// restarts failed with "Lock file is already being held."
 const DEFAULT_LOCK_RETRIES: NonNullable<LockOptions["retries"]> = {
-	retries: 200,
+	retries: 600,
 	factor: 1,
-	minTimeout: 25,
-	maxTimeout: 50,
+	minTimeout: 50,
+	maxTimeout: 100,
 	randomize: false,
 };
 
@@ -163,3 +172,49 @@ export class LockedFileSystem {
 }
 
 export const lockedFileSystem = new LockedFileSystem();
+
+/**
+ * Remove orphaned lock directories/files left behind by a process that exited
+ * abruptly. proper-lockfile normally detects stale locks via mtime, but when a
+ * crash burst triggers multiple pm2 restarts in quick succession, incoming
+ * processes collide on fresh lock entries before the stale threshold expires.
+ *
+ * Call once on startup. Safe: if a peer actively holds a lock, its mtime will
+ * be recent and we leave it alone.
+ */
+export async function reapStaleLocksIn(directory: string, staleMs: number = DEFAULT_LOCK_STALE_MS * 2): Promise<void> {
+	let entries: string[];
+	try {
+		entries = await readdir(directory);
+	} catch (error) {
+		if (isEnoent(error)) {
+			return;
+		}
+		throw error;
+	}
+	const now = Date.now();
+	for (const entry of entries) {
+		if (!entry.endsWith(".lock")) {
+			continue;
+		}
+		const lockPath = join(directory, entry);
+		try {
+			const info = await stat(lockPath);
+			if (now - info.mtimeMs < staleMs) {
+				continue;
+			}
+			await rm(lockPath, { recursive: true, force: true });
+		} catch (error) {
+			if (isEnoent(error)) {
+			}
+			// Best effort. If we cannot remove, the normal stale-break path
+			// still applies.
+		}
+	}
+}
+
+function isEnoent(error: unknown): boolean {
+	return (
+		typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "ENOENT"
+	);
+}

@@ -1,6 +1,12 @@
 import { join } from "node:path";
 
-import type { RuntimeAgentId, RuntimeHookEvent, RuntimeTaskImage, RuntimeTaskSessionSummary } from "../core/api-contract.js";
+import type {
+	RuntimeAgentId,
+	RuntimeHookEvent,
+	RuntimeTaskAttachment,
+	RuntimeTaskImage,
+	RuntimeTaskSessionSummary,
+} from "../core/api-contract.js";
 import { buildKanbanCommandParts } from "../core/kanban-command.js";
 import { quoteShellArg } from "../core/shell.js";
 import { lockedFileSystem } from "../fs/locked-file-system.js";
@@ -9,7 +15,7 @@ import { getRuntimeHomePath } from "../state/workspace-state.js";
 import { createHookRuntimeEnv } from "./hook-runtime-context.js";
 import { stripAnsi } from "./output-utils.js";
 import type { SessionTransitionEvent } from "./session-state-machine.js";
-import { prepareTaskPromptWithImages } from "./task-image-prompt.js";
+import { prepareTaskPromptWithAttachments } from "./task-attachment-prompt.js";
 
 export interface AgentAdapterLaunchInput {
 	taskId: string;
@@ -19,6 +25,7 @@ export interface AgentAdapterLaunchInput {
 	autonomousModeEnabled?: boolean;
 	cwd: string;
 	prompt: string;
+	attachments?: RuntimeTaskAttachment[];
 	images?: RuntimeTaskImage[];
 	startInPlanMode?: boolean;
 	resumeFromTrash?: boolean;
@@ -355,9 +362,11 @@ export async function prepareAgentLaunch(input: AgentAdapterLaunchInput): Promis
 	if (!adapter) {
 		throw new Error(`Unsupported agent launch requested: ${input.agentId}`);
 	}
-	const preparedPrompt = await prepareTaskPromptWithImages({
+	const preparedPrompt = await prepareTaskPromptWithAttachments({
 		prompt: input.prompt,
+		attachments: input.attachments,
 		images: input.images,
+		workspaceId: input.workspaceId,
 	});
 	return await adapter.prepare({
 		...input,

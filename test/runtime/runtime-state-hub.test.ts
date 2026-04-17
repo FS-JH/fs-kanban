@@ -127,6 +127,7 @@ describe("runtime state hub connection ordering", () => {
 					await delay(80);
 					return workspaceState;
 				},
+				invalidateWorkspaceSnapshotCache: () => {},
 				buildAggregateBoardSnapshot: async () => ({
 					board: {
 						columns: [
@@ -199,6 +200,7 @@ describe("runtime state hub connection ordering", () => {
 					};
 				},
 				buildWorkspaceStateSnapshot: async () => createWorkspaceState("/tmp/workspace-1"),
+				invalidateWorkspaceSnapshotCache: () => {},
 				buildAggregateBoardSnapshot: async () => {
 					await delay(80);
 					return {
@@ -239,9 +241,7 @@ describe("runtime state hub connection ordering", () => {
 				}),
 		);
 
-		const { socket, messages } = await connectWebSocket(
-			`ws://127.0.0.1:${port}/api/runtime/ws?view=all-projects`,
-		);
+		const { socket, messages } = await connectWebSocket(`ws://127.0.0.1:${port}/api/runtime/ws?view=all-projects`);
 		cleanupCallbacks.push(
 			async () =>
 				await new Promise<void>((resolve) => {
@@ -278,6 +278,7 @@ describe("runtime state hub connection ordering", () => {
 					await delay(40);
 					return workspaceState;
 				},
+				invalidateWorkspaceSnapshotCache: () => {},
 				buildAggregateBoardSnapshot: async () => ({
 					board: {
 						columns: [

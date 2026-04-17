@@ -1,19 +1,21 @@
-import { ImagePlus, Paperclip } from "lucide-react";
+import { Paperclip } from "lucide-react";
 import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent, ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { notifyError } from "@/components/app-toaster";
 import {
 	applyAgentComposerCompletion,
 	buildMentionInsertText,
 	detectActiveAgentComposerToken,
 } from "@/components/detail-panels/agent-chat-composer-completion";
 import { InlineCompletionPicker, type InlineCompletionItem } from "@/components/inline-completion-picker";
-import { ACCEPTED_TASK_IMAGE_INPUT_ACCEPT, collectImageFilesFromDataTransfer, extractImagesFromDataTransfer, fileToTaskImage } from "@/components/task-image-input-utils";
-import { TaskImageStrip } from "@/components/task-image-strip";
+import { ACCEPTED_TASK_ATTACHMENT_INPUT_ACCEPT, collectAttachmentFilesFromDataTransfer } from "@/components/task-attachment-input-utils";
+import { TaskAttachmentStrip } from "@/components/task-attachment-strip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
+import { uploadTaskAttachment } from "@/runtime/task-attachments";
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
-import type { TaskImage } from "@/types";
+import type { TaskAttachment } from "@/types";
 import { useDebouncedEffect } from "@/utils/react-use";
 
 const FILE_MENTION_LIMIT = 8;
@@ -24,8 +26,8 @@ interface TaskPromptComposerProps {
 	id?: string;
 	value: string;
 	onValueChange: (value: string) => void;
-	images?: TaskImage[];
-	onImagesChange?: (images: TaskImage[]) => void;
+	attachments?: TaskAttachment[];
+	onAttachmentsChange?: (attachments: TaskAttachment[]) => void;
 	onSubmit?: () => void;
 	onSubmitAndStart?: () => void;
 	onEscape?: () => void;
@@ -34,15 +36,15 @@ interface TaskPromptComposerProps {
 	enabled?: boolean;
 	autoFocus?: boolean;
 	workspaceId?: string | null;
-	showAttachImageButton?: boolean;
+	showAttachButton?: boolean;
 }
 
 export function TaskPromptComposer({
 	id,
 	value,
 	onValueChange,
-	images = [],
-	onImagesChange,
+	attachments = [],
+	onAttachmentsChange,
 	onSubmit,
 	onSubmitAndStart,
 	onEscape,
@@ -51,7 +53,7 @@ export function TaskPromptComposer({
 	enabled = true,
 	autoFocus = false,
 	workspaceId = null,
-	showAttachImageButton = true,
+	showAttachButton = true,
 }: TaskPromptComposerProps): ReactElement {
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -63,6 +65,7 @@ export function TaskPromptComposer({
 	const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
 	const [isSuggestionPickerOpen, setIsSuggestionPickerOpen] = useState(false);
 	const [isDragOver, setIsDragOver] = useState(false);
+	const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
 
 	const autoResizeTextarea = useCallback(() => {
 		const textarea = textareaRef.current;
@@ -234,56 +237,69 @@ export function TaskPromptComposer({
 		[applySuggestion, isSuggestionPickerOpen, onEscape, onSubmit, onSubmitAndStart, selectedSuggestionIndex, suggestions],
 	);
 
-	const appendImages = useCallback(
-		(newImages: TaskImage[]) => {
-			if (!onImagesChange || newImages.length === 0) {
+	const appendAttachments = useCallback(
+		(newAttachments: TaskAttachment[]) => {
+			if (!onAttachmentsChange || newAttachments.length === 0) {
 				return;
 			}
-			onImagesChange([...images, ...newImages]);
+			onAttachmentsChange([...attachments, ...newAttachments]);
 		},
-		[images, onImagesChange],
+		[attachments, onAttachmentsChange],
+	);
+
+	const uploadFiles = useCallback(
+		async (files: File[]) => {
+			if (!workspaceId || !onAttachmentsChange || files.length === 0) {
+				return;
+			}
+			setIsUploadingAttachments(true);
+			try {
+				const uploadedAttachments = await Promise.all(files.map(async (file) => await uploadTaskAttachment(workspaceId, file)));
+				appendAttachments(uploadedAttachments);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				notifyError(message);
+			} finally {
+				setIsUploadingAttachments(false);
+			}
+		},
+		[appendAttachments, onAttachmentsChange, workspaceId],
 	);
 
 	const handlePaste = useCallback(
 		(event: ClipboardEvent<HTMLTextAreaElement>) => {
-			if (!onImagesChange || !event.clipboardData) {
+			if (!onAttachmentsChange || !event.clipboardData) {
 				return;
 			}
-			const imageFiles = collectImageFilesFromDataTransfer(event.clipboardData);
-			if (imageFiles.length === 0) {
+			const attachmentFiles = collectAttachmentFilesFromDataTransfer(event.clipboardData);
+			if (attachmentFiles.length === 0) {
 				return;
 			}
 			event.preventDefault();
-			void (async () => {
-				const newImages = await extractImagesFromDataTransfer(event.clipboardData);
-				appendImages(newImages);
-			})();
+			void uploadFiles(attachmentFiles);
 		},
-		[appendImages, onImagesChange],
+		[onAttachmentsChange, uploadFiles],
 	);
 
 	const handleDrop = useCallback(
 		(event: DragEvent<HTMLDivElement>) => {
 			setIsDragOver(false);
-			if (!onImagesChange || !event.dataTransfer) {
+			if (!onAttachmentsChange || !event.dataTransfer) {
 				return;
 			}
-			const imageFiles = collectImageFilesFromDataTransfer(event.dataTransfer);
-			if (imageFiles.length === 0) {
+			const attachmentFiles = collectAttachmentFilesFromDataTransfer(event.dataTransfer);
+			if (attachmentFiles.length === 0) {
 				return;
 			}
 			event.preventDefault();
-			void (async () => {
-				const newImages = await extractImagesFromDataTransfer(event.dataTransfer);
-				appendImages(newImages);
-			})();
+			void uploadFiles(attachmentFiles);
 		},
-		[appendImages, onImagesChange],
+		[onAttachmentsChange, uploadFiles],
 	);
 
 	const handleDragOver = useCallback(
 		(event: DragEvent<HTMLDivElement>) => {
-			if (!onImagesChange) {
+			if (!onAttachmentsChange) {
 				return;
 			}
 			const hasFiles = event.dataTransfer.types.includes("Files");
@@ -293,7 +309,7 @@ export function TaskPromptComposer({
 			event.preventDefault();
 			setIsDragOver(true);
 		},
-		[onImagesChange],
+		[onAttachmentsChange],
 	);
 
 	const handleDragLeave = useCallback(
@@ -308,11 +324,11 @@ export function TaskPromptComposer({
 		[],
 	);
 
-	const handleRemoveImage = useCallback(
-		(imageId: string) => {
-			onImagesChange?.(images.filter((image) => image.id !== imageId));
+	const handleRemoveAttachment = useCallback(
+		(attachmentId: string) => {
+			onAttachmentsChange?.(attachments.filter((attachment) => attachment.id !== attachmentId));
 		},
-		[images, onImagesChange],
+		[attachments, onAttachmentsChange],
 	);
 
 	const handleAttachClick = useCallback(() => {
@@ -321,23 +337,15 @@ export function TaskPromptComposer({
 
 	const handleFileInputChange = useCallback(
 		(event: ChangeEvent<HTMLInputElement>) => {
-			if (!onImagesChange || !event.currentTarget.files) {
+			if (!onAttachmentsChange || !event.currentTarget.files) {
 				return;
 			}
 			const files = Array.from(event.currentTarget.files);
-			void (async () => {
-				const newImages: TaskImage[] = [];
-				for (const file of files) {
-					const image = await fileToTaskImage(file);
-					if (image) {
-						newImages.push(image);
-					}
-				}
-				appendImages(newImages);
+			void uploadFiles(files).finally(() => {
 				event.currentTarget.value = "";
-			})();
+			});
 		},
-		[appendImages, onImagesChange],
+		[onAttachmentsChange, uploadFiles],
 	);
 
 	const showSuggestions = Boolean(enabled && isSuggestionPickerOpen && activeToken);
@@ -393,40 +401,41 @@ export function TaskPromptComposer({
 				{isDragOver ? (
 					<div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-md bg-accent/5">
 						<div className="flex items-center gap-1.5 text-[12px] text-accent font-medium">
-							<ImagePlus size={14} />
-							<span>Drop image here</span>
+							<Paperclip size={14} />
+							<span>Drop file here</span>
 						</div>
 					</div>
 				) : null}
 			</div>
 
-			{images.length > 0 ? (
-				<TaskImageStrip
-					images={images}
-					onRemoveImage={handleRemoveImage}
+			{attachments.length > 0 ? (
+				<TaskAttachmentStrip
+					attachments={attachments}
+					workspaceId={workspaceId}
+					onRemoveAttachment={handleRemoveAttachment}
 					className="mt-1.5"
 				/>
 			) : null}
 
-			{onImagesChange && showAttachImageButton ? (
+			{onAttachmentsChange && showAttachButton ? (
 				<>
 					<input
 						ref={fileInputRef}
 						type="file"
-						accept={ACCEPTED_TASK_IMAGE_INPUT_ACCEPT}
+						accept={ACCEPTED_TASK_ATTACHMENT_INPUT_ACCEPT}
 						multiple
 						className="hidden"
 						onChange={handleFileInputChange}
 					/>
-					<div className={images.length > 0 ? "mt-1" : "mt-1.5"}>
+					<div className={attachments.length > 0 ? "mt-1" : "mt-1.5"}>
 						<Button
 							variant="ghost"
 							size="sm"
 							icon={<Paperclip size={14} />}
 							onClick={handleAttachClick}
-							disabled={disabled || !enabled}
+							disabled={disabled || !enabled || !workspaceId || isUploadingAttachments}
 						>
-							Attach image
+							{isUploadingAttachments ? "Uploading..." : "Attach file"}
 						</Button>
 					</div>
 				</>

@@ -18,7 +18,13 @@ import {
 } from "../core/api-contract.js";
 import { createGitProcessEnv } from "../core/git-process-env.js";
 import { updateTaskDependencies } from "../core/task-board-mutations.js";
-import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system.js";
+import { type LockRequest, lockedFileSystem, reapStaleLocksIn } from "../fs/locked-file-system.js";
+import {
+	collectBoardAttachmentStorageKeys,
+	deleteRemovedBoardAttachments,
+	getTaskAttachmentsRootPath,
+	pruneStaleUnreferencedTaskAttachments,
+} from "../workspace/task-attachments.js";
 
 const RUNTIME_HOME_PARENT_DIR = ".config";
 const RUNTIME_HOME_DIR = "fs-kanban";
@@ -142,6 +148,23 @@ export interface LoadWorkspaceContextOptions {
 	autoCreateIfMissing?: boolean;
 }
 
+function createWorkspaceContext(
+	repoPath: string,
+	entry: WorkspaceIndexEntry,
+	git: RuntimeGitRepositoryInfo,
+): RuntimeWorkspaceContext {
+	return {
+		repoPath,
+		workspaceId: entry.workspaceId,
+		statePath: getWorkspaceDirectoryPath(entry.workspaceId),
+		git,
+	};
+}
+
+function createKnownWorkspaceContext(workspaceId: string, repoPath: string): RuntimeWorkspaceContext {
+	return createWorkspaceContext(repoPath, { workspaceId, repoPath }, detectGitRepositoryInfo(repoPath));
+}
+
 function createEmptyBoard(): RuntimeBoardData {
 	return {
 		columns: BOARD_COLUMNS.map((column) => ({
@@ -171,6 +194,17 @@ export function getTaskWorktreesHomePath(): string {
 
 export function getWorkspacesRootPath(): string {
 	return join(getRuntimeHomePath(), WORKSPACES_DIR);
+}
+
+/**
+ * Remove orphan lock files left by a prior process that exited abruptly (e.g.
+ * SIGKILL by pm2, OOM, uncaught exception). Must be called on startup before
+ * any code path tries to acquire a workspace or index lock; otherwise the new
+ * process can cascade into the pm2 "Lock file is already being held" restart
+ * loop we observed in production.
+ */
+export async function reapStaleWorkspaceLocks(): Promise<void> {
+	await reapStaleLocksIn(getWorkspacesRootPath());
 }
 
 function getWorkspaceIndexPath(): string {
@@ -324,9 +358,7 @@ function decodeWorkspaceSessionReplayHistory(
 	);
 }
 
-async function readWorkspaceSessionReplayHistory(
-	workspaceId: string,
-): Promise<Record<string, string[]>> {
+async function readWorkspaceSessionReplayHistory(workspaceId: string): Promise<Record<string, string[]>> {
 	const replayPath = getWorkspaceSessionReplayPath(workspaceId);
 	const rawReplayHistory = await readJsonFile(replayPath);
 	return parsePersistedStateFile(
@@ -588,15 +620,10 @@ export async function loadWorkspaceContext(
 		if (!existingEntry) {
 			throw new Error(`Project ${repoPath} is not added to Kanban yet.`);
 		}
-		return {
-			repoPath,
-			workspaceId: existingEntry.workspaceId,
-			statePath: getWorkspaceDirectoryPath(existingEntry.workspaceId),
-			git: detectGitRepositoryInfo(repoPath),
-		};
+		return createWorkspaceContext(repoPath, existingEntry, detectGitRepositoryInfo(repoPath));
 	}
 
-	return await lockedFileSystem.withLock(getWorkspaceIndexLockRequest(), async () => {
+	const ensuredEntry = await lockedFileSystem.withLock(getWorkspaceIndexLockRequest(), async () => {
 		let index = await readWorkspaceIndex();
 		const existingEntry = findWorkspaceEntry(index, repoPath);
 		const ensured = existingEntry
@@ -606,14 +633,9 @@ export async function loadWorkspaceContext(
 		if (ensured.changed) {
 			await writeWorkspaceIndex(index);
 		}
-
-		return {
-			repoPath,
-			workspaceId: ensured.entry.workspaceId,
-			statePath: getWorkspaceDirectoryPath(ensured.entry.workspaceId),
-			git: detectGitRepositoryInfo(repoPath),
-		};
+		return ensured.entry;
 	});
+	return createWorkspaceContext(repoPath, ensuredEntry, detectGitRepositoryInfo(repoPath));
 }
 
 export async function loadWorkspaceContextById(workspaceId: string): Promise<RuntimeWorkspaceContext | null> {
@@ -623,7 +645,7 @@ export async function loadWorkspaceContextById(workspaceId: string): Promise<Run
 		return null;
 	}
 	try {
-		return await loadWorkspaceContext(entry.repoPath);
+		return createWorkspaceContext(entry.repoPath, entry, detectGitRepositoryInfo(entry.repoPath));
 	} catch {
 		return null;
 	}
@@ -667,15 +689,24 @@ export async function removeWorkspaceStateFiles(workspaceId: string): Promise<vo
 
 export async function loadWorkspaceState(cwd: string): Promise<RuntimeWorkspaceStateResponse> {
 	const context = await loadWorkspaceContext(cwd);
+	return await loadWorkspaceStateForContext(context);
+}
+
+async function loadWorkspaceStateForContext(context: RuntimeWorkspaceContext): Promise<RuntimeWorkspaceStateResponse> {
 	const board = await readWorkspaceBoard(context.workspaceId);
 	const sessions = await readWorkspaceSessions(context.workspaceId);
 	const meta = await readWorkspaceMeta(context.workspaceId);
 	return toWorkspaceStateResponse(context, board, sessions, meta.revision);
 }
 
-export async function loadWorkspaceSessionReplayHistoryById(
+export async function loadWorkspaceStateById(
 	workspaceId: string,
-): Promise<Record<string, Buffer[]>> {
+	repoPath: string,
+): Promise<RuntimeWorkspaceStateResponse> {
+	return await loadWorkspaceStateForContext(createKnownWorkspaceContext(workspaceId, repoPath));
+}
+
+export async function loadWorkspaceSessionReplayHistoryById(workspaceId: string): Promise<Record<string, Buffer[]>> {
 	return decodeWorkspaceSessionReplayHistory(await readWorkspaceSessionReplayHistory(workspaceId));
 }
 
@@ -701,10 +732,19 @@ export async function saveWorkspaceState(
 	cwd: string,
 	payload: RuntimeWorkspaceStateSaveRequest,
 ): Promise<RuntimeWorkspaceStateResponse> {
-	const parsedPayload = parseWorkspaceStateSavePayload(payload);
 	const context = await loadWorkspaceContext(cwd);
+	return await saveWorkspaceStateForContext(context, payload);
+}
+
+async function saveWorkspaceStateForContext(
+	context: RuntimeWorkspaceContext,
+	payload: RuntimeWorkspaceStateSaveRequest,
+): Promise<RuntimeWorkspaceStateResponse> {
+	const parsedPayload = parseWorkspaceStateSavePayload(payload);
 	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
 		const metaPath = getWorkspaceMetaPath(context.workspaceId);
+		const attachmentsRootPath = getTaskAttachmentsRootPath(getWorkspaceDirectoryPath(context.workspaceId));
+		const currentBoard = await readWorkspaceBoard(context.workspaceId);
 		const currentMeta = await readWorkspaceMeta(context.workspaceId);
 		const expectedRevision = parsedPayload.expectedRevision;
 		if (
@@ -732,9 +772,19 @@ export async function saveWorkspaceState(
 		await lockedFileSystem.writeJsonFileAtomic(metaPath, nextMeta, {
 			lock: null,
 		});
+		await deleteRemovedBoardAttachments(attachmentsRootPath, currentBoard, board);
+		await pruneStaleUnreferencedTaskAttachments(attachmentsRootPath, collectBoardAttachmentStorageKeys(board));
 
 		return toWorkspaceStateResponse(context, board, sessions, nextRevision);
 	});
+}
+
+export async function saveWorkspaceStateById(
+	workspaceId: string,
+	repoPath: string,
+	payload: RuntimeWorkspaceStateSaveRequest,
+): Promise<RuntimeWorkspaceStateResponse> {
+	return await saveWorkspaceStateForContext(createKnownWorkspaceContext(workspaceId, repoPath), payload);
 }
 
 export interface RuntimeWorkspaceAtomicMutationResult<T> {
@@ -756,6 +806,7 @@ export async function mutateWorkspaceState<T>(
 ): Promise<RuntimeWorkspaceAtomicMutationResponse<T>> {
 	const context = await loadWorkspaceContext(cwd);
 	return await lockedFileSystem.withLock(getWorkspaceDirectoryLockRequest(context.workspaceId), async () => {
+		const attachmentsRootPath = getTaskAttachmentsRootPath(getWorkspaceDirectoryPath(context.workspaceId));
 		const currentBoard = await readWorkspaceBoard(context.workspaceId);
 		const currentSessions = await readWorkspaceSessions(context.workspaceId);
 		const currentMeta = await readWorkspaceMeta(context.workspaceId);
@@ -787,6 +838,8 @@ export async function mutateWorkspaceState<T>(
 		await lockedFileSystem.writeJsonFileAtomic(getWorkspaceMetaPath(context.workspaceId), nextMeta, {
 			lock: null,
 		});
+		await deleteRemovedBoardAttachments(attachmentsRootPath, currentBoard, nextBoard);
+		await pruneStaleUnreferencedTaskAttachments(attachmentsRootPath, collectBoardAttachmentStorageKeys(nextBoard));
 
 		return {
 			value: mutation.value,

@@ -1,5 +1,9 @@
 import type { RuntimeTaskSessionSummary, RuntimeWorkspaceStateResponse } from "../core/api-contract.js";
-import { listWorkspaceIndexEntries, loadWorkspaceState, saveWorkspaceState } from "../state/workspace-state.js";
+import {
+	listWorkspaceIndexEntries,
+	loadWorkspaceStateById,
+	saveWorkspaceStateById,
+} from "../state/workspace-state.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
 import type { WorkspaceRegistry } from "./workspace-registry.js";
 
@@ -11,6 +15,7 @@ export interface RuntimeShutdownCoordinatorDependencies {
 }
 
 async function persistInterruptedSessions(
+	workspaceId: string,
 	workspacePath: string,
 	interruptedTaskIds: string[],
 	options?: {
@@ -21,7 +26,7 @@ async function persistInterruptedSessions(
 	if (interruptedTaskIds.length === 0) {
 		return;
 	}
-	const workspaceState = options?.workspaceState ?? (await loadWorkspaceState(workspacePath));
+	const workspaceState = options?.workspaceState ?? (await loadWorkspaceStateById(workspaceId, workspacePath));
 	const nextSessions = {
 		...workspaceState.sessions,
 	};
@@ -37,7 +42,7 @@ async function persistInterruptedSessions(
 			};
 		}
 	}
-	await saveWorkspaceState(workspacePath, {
+	await saveWorkspaceStateById(workspaceId, workspacePath, {
 		board: workspaceState.board,
 		sessions: nextSessions,
 	});
@@ -71,6 +76,7 @@ export async function shutdownRuntimeServer(deps: RuntimeShutdownCoordinatorDepe
 	}
 
 	const interruptedByWorkspace: Array<{
+		workspaceId: string;
 		workspacePath: string;
 		interruptedTaskIds: string[];
 		workspaceState?: RuntimeWorkspaceStateResponse;
@@ -78,7 +84,7 @@ export async function shutdownRuntimeServer(deps: RuntimeShutdownCoordinatorDepe
 	}> = [];
 	const managedWorkspacePaths = new Set<string>();
 
-	for (const { workspacePath, terminalManager } of deps.workspaceRegistry.listManagedWorkspaces()) {
+	for (const { workspaceId, workspacePath, terminalManager } of deps.workspaceRegistry.listManagedWorkspaces()) {
 		const interrupted = terminalManager.markInterruptedAndStopAll();
 		const interruptedTaskIds = new Set(collectShutdownInterruptedTaskIds(interrupted, terminalManager));
 		if (!workspacePath) {
@@ -86,8 +92,9 @@ export async function shutdownRuntimeServer(deps: RuntimeShutdownCoordinatorDepe
 		}
 		managedWorkspacePaths.add(workspacePath);
 		try {
-			const workspaceState = await loadWorkspaceState(workspacePath);
+			const workspaceState = await loadWorkspaceStateById(workspaceId, workspacePath);
 			interruptedByWorkspace.push({
+				workspaceId,
 				workspacePath,
 				interruptedTaskIds: Array.from(interruptedTaskIds),
 				workspaceState,
@@ -105,7 +112,7 @@ export async function shutdownRuntimeServer(deps: RuntimeShutdownCoordinatorDepe
 			continue;
 		}
 		try {
-			const workspaceState = await loadWorkspaceState(workspace.repoPath);
+			const workspaceState = await loadWorkspaceStateById(workspace.workspaceId, workspace.repoPath);
 			const interruptedTaskIds = Object.values(workspaceState.sessions)
 				.filter((summary) => shouldInterruptSessionOnShutdown(summary))
 				.map((summary) => summary.taskId);
@@ -113,6 +120,7 @@ export async function shutdownRuntimeServer(deps: RuntimeShutdownCoordinatorDepe
 				continue;
 			}
 			interruptedByWorkspace.push({
+				workspaceId: workspace.workspaceId,
 				workspacePath: workspace.repoPath,
 				interruptedTaskIds,
 				workspaceState,
@@ -125,7 +133,7 @@ export async function shutdownRuntimeServer(deps: RuntimeShutdownCoordinatorDepe
 
 	await Promise.all(
 		interruptedByWorkspace.map(async (workspace) => {
-			await persistInterruptedSessions(workspace.workspacePath, workspace.interruptedTaskIds, {
+			await persistInterruptedSessions(workspace.workspaceId, workspace.workspacePath, workspace.interruptedTaskIds, {
 				workspaceState: workspace.workspaceState,
 				resolveSummary: workspace.resolveSummary,
 			});

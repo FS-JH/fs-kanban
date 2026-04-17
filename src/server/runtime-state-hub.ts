@@ -31,7 +31,11 @@ export interface DisposeRuntimeStateWorkspaceOptions {
 export interface CreateRuntimeStateHubDependencies {
 	workspaceRegistry: Pick<
 		WorkspaceRegistry,
-		"resolveWorkspaceForStream" | "buildProjectsPayload" | "buildWorkspaceStateSnapshot" | "buildAggregateBoardSnapshot"
+		| "resolveWorkspaceForStream"
+		| "buildProjectsPayload"
+		| "buildWorkspaceStateSnapshot"
+		| "invalidateWorkspaceSnapshotCache"
+		| "buildAggregateBoardSnapshot"
 	>;
 }
 
@@ -135,7 +139,9 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		};
 	};
 
-	const getProjectsPayload = async (preferredCurrentProjectId: string | null): Promise<RuntimeStateStreamProjectsMessage> => {
+	const getProjectsPayload = async (
+		preferredCurrentProjectId: string | null,
+	): Promise<RuntimeStateStreamProjectsMessage> => {
 		const cachedPayload = runtimeProjectsPayloadCache.payload;
 		if (cachedPayload) {
 			return adaptProjectsPayloadForPreferredWorkspace(cachedPayload, preferredCurrentProjectId);
@@ -400,6 +406,11 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 	const broadcastRuntimeWorkspaceStateUpdated = async (workspaceId: string, workspacePath: string): Promise<void> => {
 		const clients = runtimeStateClientsByWorkspaceId.get(workspaceId);
 		try {
+			// Drop the registry-level snapshot cache so the rebuild sees fresh
+			// disk state after a mutation. Without this, broadcasts after
+			// saveState / session transitions could echo stale data for up to
+			// the snapshot TTL.
+			deps.workspaceRegistry.invalidateWorkspaceSnapshotCache(workspaceId);
 			const workspaceState = await deps.workspaceRegistry.buildWorkspaceStateSnapshot(workspaceId, workspacePath);
 			workspaceStateSnapshotCache.set(workspaceId, workspaceState);
 			if (clients && clients.size > 0) {

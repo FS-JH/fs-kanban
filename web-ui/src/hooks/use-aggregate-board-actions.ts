@@ -190,6 +190,7 @@ export function useAggregateBoardActions(): UseAggregateBoardActionsResult {
 				startInPlanMode: selection.card.startInPlanMode,
 				autoReviewEnabled: false,
 				autoReviewMode: resolveTaskAutoReviewMode(selection.card.autoReviewMode),
+				attachments: selection.card.attachments,
 				images: selection.card.images,
 				agentId: selection.card.agentId,
 				fallbackAgentId: selection.card.fallbackAgentId,

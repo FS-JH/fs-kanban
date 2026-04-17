@@ -1,9 +1,19 @@
-import type { RuntimeAgentId, RuntimeBoardColumnId, RuntimeTaskAutoReviewMode, RuntimeTaskImage } from "@/runtime/types";
+import type {
+	RuntimeAgentId,
+	RuntimeBoardColumnId,
+	RuntimeTaskAttachment,
+	RuntimeTaskAutoReviewMode,
+	RuntimeTaskImage,
+} from "@/runtime/types";
 
 export type BoardColumnId = RuntimeBoardColumnId;
 
 export type TaskAutoReviewMode = RuntimeTaskAutoReviewMode;
 export type TaskImage = RuntimeTaskImage;
+export interface TaskAttachment extends RuntimeTaskAttachment {
+	previewUrl?: string;
+	legacyImageDataBase64?: string;
+}
 
 export const DEFAULT_TASK_AUTO_REVIEW_MODE: TaskAutoReviewMode = "commit";
 
@@ -42,6 +52,7 @@ export interface BoardCard {
 	startInPlanMode: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: TaskAutoReviewMode;
+	attachments?: TaskAttachment[];
 	images?: TaskImage[];
 	agentId?: RuntimeAgentId;
 	fallbackAgentId?: RuntimeAgentId | null;

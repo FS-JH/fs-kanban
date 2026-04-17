@@ -7,6 +7,7 @@ import type { RuntimeAgentId } from "@/runtime/types";
 import { isAllowedCrossColumnCardMove, type ProgrammaticCardMoveInFlight } from "@/state/drag-rules";
 import {
 	type BoardCard,
+	type TaskAttachment,
 	type BoardColumn,
 	type BoardColumnId,
 	type BoardData,
@@ -23,6 +24,7 @@ export interface TaskDraft {
 	startInPlanMode?: boolean;
 	autoReviewEnabled?: boolean;
 	autoReviewMode?: TaskAutoReviewMode;
+	attachments?: TaskAttachment[];
 	images?: TaskImage[];
 	agentId?: RuntimeAgentId;
 	fallbackAgentId?: RuntimeAgentId | null;
@@ -72,6 +74,15 @@ function createBrowserUuid(): string {
 	return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
 }
 
+function estimateTaskImageSizeBytes(data: string): number {
+	const normalized = data.trim();
+	if (!normalized) {
+		return 0;
+	}
+	const paddingLength = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
+	return Math.max(0, Math.floor((normalized.length * 3) / 4) - paddingLength);
+}
+
 function normalizeTaskImages(rawImages: unknown): TaskImage[] | undefined {
 	if (!Array.isArray(rawImages)) {
 		return undefined;
@@ -93,6 +104,68 @@ function normalizeTaskImages(rawImages: unknown): TaskImage[] | undefined {
 		});
 	}
 	return images.length > 0 ? images : undefined;
+}
+
+function normalizeTaskAttachments(rawAttachments: unknown, legacyImages: TaskImage[] | undefined): TaskAttachment[] | undefined {
+	const legacyImageById = new Map((legacyImages ?? []).map((image) => [image.id, image]));
+	if (!Array.isArray(rawAttachments)) {
+		if (!legacyImages || legacyImages.length === 0) {
+			return undefined;
+		}
+		return legacyImages.map((image, index) => ({
+			id: image.id,
+			kind: "image",
+			name: image.name ?? `image-${index + 1}`,
+			mimeType: image.mimeType,
+			sizeBytes: estimateTaskImageSizeBytes(image.data),
+			storageKey: "",
+			legacyImageDataBase64: image.data,
+		}));
+	}
+
+	const attachments: TaskAttachment[] = [];
+	for (const rawAttachment of rawAttachments) {
+		if (!rawAttachment || typeof rawAttachment !== "object") {
+			continue;
+		}
+		const attachment = rawAttachment as {
+			id?: unknown;
+			kind?: unknown;
+			name?: unknown;
+			mimeType?: unknown;
+			sizeBytes?: unknown;
+			storageKey?: unknown;
+		};
+		if (
+			typeof attachment.id !== "string" ||
+			typeof attachment.name !== "string" ||
+			typeof attachment.mimeType !== "string" ||
+			typeof attachment.sizeBytes !== "number" ||
+			typeof attachment.storageKey !== "string"
+		) {
+			continue;
+		}
+		if (
+			attachment.kind !== "image" &&
+			attachment.kind !== "document" &&
+			attachment.kind !== "text" &&
+			attachment.kind !== "data" &&
+			attachment.kind !== "other"
+		) {
+			continue;
+		}
+		const legacyImage = legacyImageById.get(attachment.id);
+		attachments.push({
+			id: attachment.id,
+			kind: attachment.kind,
+			name: attachment.name,
+			mimeType: attachment.mimeType,
+			sizeBytes: attachment.sizeBytes,
+			storageKey: attachment.storageKey,
+			...(legacyImage ? { legacyImageDataBase64: legacyImage.data } : {}),
+		});
+	}
+	return attachments.length > 0 ? attachments : undefined;
 }
 
 function normalizeTaskAgentId(rawAgentId: unknown): RuntimeAgentId | undefined {
@@ -127,6 +200,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		startInPlanMode?: unknown;
 		autoReviewEnabled?: unknown;
 		autoReviewMode?: unknown;
+		attachments?: unknown;
 		images?: unknown;
 		agentId?: unknown;
 		fallbackAgentId?: unknown;
@@ -146,6 +220,7 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 	const now = Date.now();
 	const agentId = normalizeTaskAgentId(card.agentId);
 	const fallbackAgentId = normalizeTaskFallbackAgentId(card.fallbackAgentId, agentId);
+	const images = normalizeTaskImages(card.images);
 
 	return {
 		id: typeof card.id === "string" && card.id ? card.id : createShortTaskId(createBrowserUuid),
@@ -155,7 +230,8 @@ function normalizeCard(rawCard: unknown): BoardCard | null {
 		autoReviewMode: resolveTaskAutoReviewMode(
 			typeof card.autoReviewMode === "string" ? (card.autoReviewMode as TaskAutoReviewMode) : undefined,
 		),
-		images: normalizeTaskImages(card.images),
+		attachments: normalizeTaskAttachments(card.attachments, images),
+		images,
 		agentId,
 		fallbackAgentId,
 		baseRef,
@@ -302,6 +378,7 @@ export function addTaskToColumnWithResult(
 			startInPlanMode: draft.startInPlanMode,
 			autoReviewEnabled: draft.autoReviewEnabled,
 			autoReviewMode: draft.autoReviewMode,
+			attachments: draft.attachments,
 			images: draft.images,
 			agentId: draft.agentId,
 			fallbackAgentId: draft.fallbackAgentId,
@@ -493,6 +570,12 @@ export function updateTask(board: BoardData, taskId: string, draft: TaskDraft): 
 				startInPlanMode: Boolean(draft.startInPlanMode),
 				autoReviewEnabled: Boolean(draft.autoReviewEnabled),
 				autoReviewMode: resolveTaskAutoReviewMode(draft.autoReviewMode ?? DEFAULT_TASK_AUTO_REVIEW_MODE),
+				attachments:
+					draft.attachments === undefined
+						? card.attachments
+						: draft.attachments.length > 0
+							? draft.attachments.map((attachment) => ({ ...attachment }))
+							: undefined,
 				images: draft.images === undefined ? card.images : draft.images.length > 0 ? draft.images.map((image) => ({ ...image })) : undefined,
 				agentId: draft.agentId,
 				fallbackAgentId: draft.fallbackAgentId === undefined ? card.fallbackAgentId : draft.fallbackAgentId,
@@ -520,6 +603,7 @@ export function disableTaskAutoReview(board: BoardData, taskId: string): { board
 		startInPlanMode: selection.card.startInPlanMode,
 		autoReviewEnabled: false,
 		autoReviewMode: DEFAULT_TASK_AUTO_REVIEW_MODE,
+		attachments: selection.card.attachments,
 		images: selection.card.images,
 		agentId: selection.card.agentId,
 		fallbackAgentId: selection.card.fallbackAgentId,

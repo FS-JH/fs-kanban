@@ -10,6 +10,7 @@ import { registerHooksCommand } from "./commands/hooks.js";
 import { registerTaskCommand } from "./commands/task.js";
 import { loadGlobalRuntimeConfig, loadRuntimeConfig } from "./config/runtime-config.js";
 import type { RuntimeCommandRunResponse } from "./core/api-contract.js";
+import { getKanbanLogFilePath, installCrashHandlers, logError } from "./core/crash-logger.js";
 import { createGitProcessEnv } from "./core/git-process-env.js";
 import {
 	installGracefulShutdownHandlers,
@@ -312,6 +313,7 @@ async function startServer(): Promise<{
 		{ resolveInteractiveShellCommand },
 		{ shutdownRuntimeServer },
 		{ collectProjectWorktreeTaskIdsForRemoval, createWorkspaceRegistry },
+		{ reapStaleWorkspaceLocks },
 	] = await Promise.all([
 		import("./projects/project-path.js"),
 		import("./server/directory-picker.js"),
@@ -320,7 +322,16 @@ async function startServer(): Promise<{
 		import("./server/shell.js"),
 		import("./server/shutdown-coordinator.js"),
 		import("./server/workspace-registry.js"),
+		import("./state/workspace-state.js"),
 	]);
+
+	// Clean up any orphan lock files from a prior crash before the workspace
+	// registry begins touching the filesystem. Without this, pm2 restarts
+	// cascade into "Lock file is already being held" failures for up to a
+	// minute.
+	await reapStaleWorkspaceLocks().catch((error) => {
+		logError("reapStaleWorkspaceLocks", error);
+	});
 	let runtimeStateHub: RuntimeStateHub | undefined;
 	const workspaceRegistry = await createWorkspaceRegistry({
 		cwd: process.cwd(),
@@ -529,13 +540,22 @@ function createProgram(invocationArgs: string[]): Command {
 }
 
 async function run(): Promise<void> {
+	installCrashHandlers({
+		onFatalUncaughtException: () => {
+			// Exit so the pm2/launchd supervisor can restart us cleanly rather
+			// than leaving us in an unknown state after an uncaught error.
+			process.exit(1);
+		},
+	});
 	const argv = process.argv.slice(2);
 	const program = createProgram(argv);
 	await program.parseAsync(argv, { from: "user" });
 }
 
 void run().catch(async (error) => {
+	logError("startup", error);
 	const message = error instanceof Error ? error.message : String(error);
 	console.error(`Failed to start FS Kanban: ${message}`);
+	console.error(`See log: ${getKanbanLogFilePath()}`);
 	process.exit(1);
 });

@@ -7,7 +7,28 @@ import type {
 import { getGitSyncSummary, probeGitWorkspaceState } from "../workspace/git-sync.js";
 import { getTaskWorkspacePathInfo } from "../workspace/task-worktree.js";
 
-const WORKSPACE_METADATA_POLL_INTERVAL_MS = 1_000;
+// Git-state polling runs once per connected workspace and spawns ~3 git
+// subprocesses for the home repo plus ~3 per tracked task worktree every tick.
+// At 1s ticks this dominated idle CPU (~10% sustained) and starved the event
+// loop under UI interaction. 5s keeps UI git-state indicators responsive
+// enough while cutting steady-state cost ~80%. Override with
+// KANBAN_WORKSPACE_METADATA_POLL_MS for per-deployment tuning.
+const DEFAULT_WORKSPACE_METADATA_POLL_INTERVAL_MS = 5_000;
+const MIN_WORKSPACE_METADATA_POLL_INTERVAL_MS = 500;
+
+function resolveWorkspaceMetadataPollIntervalMs(): number {
+	const raw = process.env.KANBAN_WORKSPACE_METADATA_POLL_MS;
+	if (!raw) {
+		return DEFAULT_WORKSPACE_METADATA_POLL_INTERVAL_MS;
+	}
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isFinite(parsed) || parsed < MIN_WORKSPACE_METADATA_POLL_INTERVAL_MS) {
+		return DEFAULT_WORKSPACE_METADATA_POLL_INTERVAL_MS;
+	}
+	return parsed;
+}
+
+const WORKSPACE_METADATA_POLL_INTERVAL_MS = resolveWorkspaceMetadataPollIntervalMs();
 const WORKSPACE_METADATA_IDLE_CACHE_MS = 30_000;
 
 interface TrackedTaskWorkspace {

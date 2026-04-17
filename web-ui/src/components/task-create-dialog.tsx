@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { LocalStorageKey } from "@/storage/local-storage-store";
 import type { RuntimeConfigResponse } from "@/runtime/types";
-import type { TaskAutoReviewMode, TaskImage } from "@/types";
+import type { TaskAttachment, TaskAutoReviewMode } from "@/types";
 import { isMacPlatform, pasteShortcutLabel } from "@/utils/platform";
 import { useRawLocalStorageValue } from "@/utils/react-use";
 import type {
@@ -98,8 +98,8 @@ export function TaskCreateDialog({
 	onOpenChange,
 	prompt,
 	onPromptChange,
-	images,
-	onImagesChange,
+	attachments,
+	onAttachmentsChange,
 	onCreate,
 	onCreateAndStart,
 	onCreateMultiple,
@@ -126,8 +126,8 @@ export function TaskCreateDialog({
 	onOpenChange: (open: boolean) => void;
 	prompt: string;
 	onPromptChange: (value: string) => void;
-	images: TaskImage[];
-	onImagesChange: Dispatch<SetStateAction<TaskImage[]>>;
+	attachments: TaskAttachment[];
+	onAttachmentsChange: Dispatch<SetStateAction<TaskAttachment[]>>;
 	onCreate: (options?: { keepDialogOpen?: boolean }) => string | null;
 	onCreateAndStart?: (options?: { keepDialogOpen?: boolean }) => string | null;
 	onCreateMultiple: (prompts: string[], options?: { keepDialogOpen?: boolean }) => string[];
@@ -247,13 +247,13 @@ export function TaskCreateDialog({
 
 	const resetForCreateMore = useCallback(() => {
 		onPromptChange("");
-		onImagesChange([]);
+		onAttachmentsChange([]);
 		setMode("single");
 		setTaskPrompts([]);
 		inputRefs.current = [];
 		nextFocusIndexRef.current = null;
 		setComposerResetKey((current) => current + 1);
-	}, [onImagesChange, onPromptChange]);
+	}, [onAttachmentsChange, onPromptChange]);
 
 	const handleCreateSingle = useCallback(() => {
 		const createdTaskId = onCreate({ keepDialogOpen: createMore });
@@ -410,20 +410,20 @@ export function TaskCreateDialog({
 							key={composerResetKey}
 							value={prompt}
 							onValueChange={onPromptChange}
-							images={images}
-							onImagesChange={onImagesChange}
+							attachments={attachments}
+							onAttachmentsChange={onAttachmentsChange}
 							onSubmit={handleCreateSingle}
 							onSubmitAndStart={() => handleRunSingleStartAction("start")}
 							placeholder="Describe the task..."
 							autoFocus
 							workspaceId={workspaceId}
-							showAttachImageButton={false}
+							showAttachButton={false}
 						/>
 						<div className="flex items-center justify-between mt-1.5">
 							<p className="text-[11px] text-text-tertiary">
 								Use <code className="rounded bg-surface-3 px-1 py-px font-mono text-[11px]">@file</code> to reference
 								files. Drag and drop or <code className="rounded bg-surface-3 px-1 py-px font-mono text-[11px]">{pasteShortcutLabel}</code> to
-								add images.
+								add attachments.
 							</p>
 							{detectedItems.length >= 2 ? (
 								<button

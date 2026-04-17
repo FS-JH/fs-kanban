@@ -3,7 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTaskEditor } from "@/hooks/use-task-editor";
-import type { BoardCard, BoardData, TaskAutoReviewMode, TaskImage } from "@/types";
+import type { BoardCard, BoardData, TaskAttachment, TaskAutoReviewMode } from "@/types";
 
 function createTask(taskId: string, prompt: string, createdAt: number, overrides: Partial<BoardCard> = {}): BoardCard {
 	return {
@@ -35,7 +35,7 @@ interface HookSnapshot {
 	board: BoardData;
 	isInlineTaskCreateOpen: boolean;
 	newTaskPrompt: string;
-	newTaskImages: TaskImage[];
+	newTaskAttachments: TaskAttachment[];
 	newTaskBranchRef: string;
 	editingTaskId: string | null;
 	editTaskPrompt: string;
@@ -45,7 +45,7 @@ interface HookSnapshot {
 	handleCreateTask: (options?: { keepDialogOpen?: boolean }) => string | null;
 	handleCreateTasks: (prompts: string[], options?: { keepDialogOpen?: boolean }) => string[];
 	setNewTaskPrompt: (value: string) => void;
-	setNewTaskImages: (value: TaskImage[]) => void;
+	setNewTaskAttachments: (value: TaskAttachment[]) => void;
 	handleOpenEditTask: (task: BoardCard) => void;
 	handleSaveEditedTask: () => string | null;
 	handleSaveAndStartEditedTask: () => void;
@@ -88,7 +88,7 @@ function HookHarness({
 			board,
 			isInlineTaskCreateOpen: editor.isInlineTaskCreateOpen,
 			newTaskPrompt: editor.newTaskPrompt,
-			newTaskImages: editor.newTaskImages,
+			newTaskAttachments: editor.newTaskAttachments,
 			newTaskBranchRef: editor.newTaskBranchRef,
 			editingTaskId: editor.editingTaskId,
 			editTaskPrompt: editor.editTaskPrompt,
@@ -98,7 +98,7 @@ function HookHarness({
 			handleCreateTask: editor.handleCreateTask,
 			handleCreateTasks: editor.handleCreateTasks,
 			setNewTaskPrompt: editor.setNewTaskPrompt,
-			setNewTaskImages: editor.setNewTaskImages,
+			setNewTaskAttachments: editor.setNewTaskAttachments,
 			handleOpenEditTask: editor.handleOpenEditTask,
 			handleSaveEditedTask: editor.handleSaveEditedTask,
 			handleSaveAndStartEditedTask: editor.handleSaveAndStartEditedTask,
@@ -120,12 +120,12 @@ function HookHarness({
 		editor.isEditTaskStartInPlanModeDisabled,
 		editor.isInlineTaskCreateOpen,
 		editor.newTaskPrompt,
-		editor.newTaskImages,
+		editor.newTaskAttachments,
 		editor.newTaskBranchRef,
 		editor.setEditTaskAutoReviewEnabled,
 		editor.setEditTaskAutoReviewMode,
 		editor.setEditTaskPrompt,
-		editor.setNewTaskImages,
+		editor.setNewTaskAttachments,
 		editor.setNewTaskPrompt,
 		onSnapshot,
 	]);
@@ -320,7 +320,7 @@ describe("useTaskEditor", () => {
 		expect(snapshot.newTaskBranchRef).toBe("main");
 		expect(snapshot.board.columns[0]?.cards.some((card) => card.prompt === "Create another task")).toBe(true);
 	});
-	it("copies attached images to each split task and clears the draft images", async () => {
+	it("copies attached attachments to each split task and clears the draft attachments", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
 		await act(async () => {
@@ -339,11 +339,14 @@ describe("useTaskEditor", () => {
 		});
 
 		await act(async () => {
-			latestSnapshot?.setNewTaskImages([
+			latestSnapshot?.setNewTaskAttachments([
 				{
-					id: "img-1",
-					data: "abc123",
-					mimeType: "image/png",
+					id: "att-1",
+					kind: "document",
+					name: "notes.pdf",
+					mimeType: "application/pdf",
+					sizeBytes: 1024,
+					storageKey: "att-1-notes.pdf",
 				},
 			]);
 		});
@@ -356,23 +359,29 @@ describe("useTaskEditor", () => {
 		expect(createdTaskIds).toHaveLength(2);
 		const backlogCards = requireSnapshot(latestSnapshot).board.columns[0]?.cards ?? [];
 		expect(backlogCards).toHaveLength(2);
-		expect(backlogCards.map((card) => card.images)).toEqual([
+		expect(backlogCards.map((card) => card.attachments)).toEqual([
 			[
 				{
-					id: "img-1",
-					data: "abc123",
-					mimeType: "image/png",
+					id: "att-1",
+					kind: "document",
+					name: "notes.pdf",
+					mimeType: "application/pdf",
+					sizeBytes: 1024,
+					storageKey: "att-1-notes.pdf",
 				},
 			],
 			[
 				{
-					id: "img-1",
-					data: "abc123",
-					mimeType: "image/png",
+					id: "att-1",
+					kind: "document",
+					name: "notes.pdf",
+					mimeType: "application/pdf",
+					sizeBytes: 1024,
+					storageKey: "att-1-notes.pdf",
 				},
 			],
 		]);
-		expect(requireSnapshot(latestSnapshot).newTaskImages).toEqual([]);
+		expect(requireSnapshot(latestSnapshot).newTaskAttachments).toEqual([]);
 	});
 
 });

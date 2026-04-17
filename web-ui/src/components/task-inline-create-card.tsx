@@ -8,7 +8,7 @@ import { TaskAgentPreferenceFields } from "@/components/task-agent-preference-fi
 import { TaskPromptComposer } from "@/components/task-prompt-composer";
 import { Button } from "@/components/ui/button";
 import type { RuntimeConfigResponse } from "@/runtime/types";
-import type { TaskAutoReviewMode, TaskImage } from "@/types";
+import type { TaskAttachment, TaskAutoReviewMode } from "@/types";
 import { pasteShortcutLabel } from "@/utils/platform";
 import { useDocumentEvent, useMeasure } from "@/utils/react-use";
 import type {
@@ -50,8 +50,8 @@ function ButtonShortcut({ includeShift = false }: { includeShift?: boolean }): R
 export function TaskInlineCreateCard({
 	prompt,
 	onPromptChange,
-	images,
-	onImagesChange,
+	attachments,
+	onAttachmentsChange,
 	onCreate,
 	onCreateAndStart,
 	onCancel,
@@ -77,8 +77,8 @@ export function TaskInlineCreateCard({
 }: {
 	prompt: string;
 	onPromptChange: (value: string) => void;
-	images?: TaskImage[];
-	onImagesChange?: Dispatch<SetStateAction<TaskImage[]>>;
+	attachments?: TaskAttachment[];
+	onAttachmentsChange?: Dispatch<SetStateAction<TaskAttachment[]>>;
 	onCreate: () => void;
 	onCreateAndStart?: () => void;
 	onCancel?: () => void;
@@ -176,8 +176,8 @@ export function TaskInlineCreateCard({
 					id={promptId}
 					value={prompt}
 					onValueChange={onPromptChange}
-					images={images}
-					onImagesChange={onImagesChange}
+					attachments={attachments}
+					onAttachmentsChange={onAttachmentsChange}
 					onSubmit={onCreate}
 					onSubmitAndStart={onCreateAndStart}
 					onEscape={onCancel}
@@ -185,12 +185,12 @@ export function TaskInlineCreateCard({
 					enabled={enabled}
 					autoFocus
 					workspaceId={workspaceId}
-					showAttachImageButton={false}
+					showAttachButton={false}
 				/>
 				<p className="text-[11px] text-text-tertiary mt-1 mb-0">
 					Use <code className="rounded bg-surface-3 px-1 py-px font-mono text-[11px]">@file</code> to reference
 					files. Drag and drop or <code className="rounded bg-surface-3 px-1 py-px font-mono text-[11px]">{pasteShortcutLabel}</code> to
-					add images.
+					add attachments.
 				</p>
 			</div>
 

@@ -3,6 +3,7 @@
 // for command-driven agents such as Claude Code, Codex, Gemini, and shell sessions.
 import type {
 	RuntimeTaskHookActivity,
+	RuntimeTaskAttachment,
 	RuntimeTaskImage,
 	RuntimeTaskSessionReviewReason,
 	RuntimeTaskSessionState,
@@ -79,6 +80,7 @@ export interface StartTaskSessionRequest {
 	autonomousModeEnabled?: boolean;
 	cwd: string;
 	prompt: string;
+	attachments?: RuntimeTaskAttachment[];
 	images?: RuntimeTaskImage[];
 	startInPlanMode?: boolean;
 	resumeFromTrash?: boolean;
@@ -158,6 +160,7 @@ function cloneStartTaskSessionRequest(request: StartTaskSessionRequest): StartTa
 	return {
 		...request,
 		args: [...request.args],
+		attachments: request.attachments ? request.attachments.map((attachment) => ({ ...attachment })) : undefined,
 		images: request.images ? request.images.map((image) => ({ ...image })) : undefined,
 		env: request.env ? { ...request.env } : undefined,
 	};
@@ -319,6 +322,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			autonomousModeEnabled: request.autonomousModeEnabled,
 			cwd: request.cwd,
 			prompt: request.prompt,
+			attachments: request.attachments,
 			images: request.images,
 			startInPlanMode: request.startInPlanMode,
 			resumeFromTrash: request.resumeFromTrash,

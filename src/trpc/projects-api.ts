@@ -9,7 +9,7 @@ import {
 	listWorkspaceIndexEntries,
 	loadWorkspaceContext,
 	loadWorkspaceContextById,
-	loadWorkspaceState,
+	loadWorkspaceStateById,
 	removeWorkspaceIndexEntry,
 	removeWorkspaceStateFiles,
 } from "../state/workspace-state.js";
@@ -141,7 +141,10 @@ export function createProjectsApi(deps: CreateProjectsApiDependencies): RuntimeT
 
 				const taskIdsToCleanup = new Set<string>();
 				try {
-					const workspaceState = await loadWorkspaceState(projectToRemove.repoPath);
+					const workspaceState = await loadWorkspaceStateById(
+						projectToRemove.workspaceId,
+						projectToRemove.repoPath,
+					);
 					for (const taskId of deps.collectProjectWorktreeTaskIdsForRemoval(workspaceState.board)) {
 						taskIdsToCleanup.add(taskId);
 					}

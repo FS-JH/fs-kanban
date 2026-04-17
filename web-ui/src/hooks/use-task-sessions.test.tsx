@@ -248,6 +248,55 @@ describe("useTaskSessions", () => {
 		);
 	});
 
+	it("forwards task attachments when starting a task", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (latestSnapshot === null) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			await latestSnapshot?.startTaskSession({
+				...createTask(),
+				attachments: [
+					{
+						id: "att-1",
+						kind: "document",
+						name: "notes.pdf",
+						mimeType: "application/pdf",
+						sizeBytes: 1024,
+						storageKey: "att-1-notes.pdf",
+					},
+				],
+			});
+		});
+
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				attachments: [
+					{
+						id: "att-1",
+						kind: "document",
+						name: "notes.pdf",
+						mimeType: "application/pdf",
+						sizeBytes: 1024,
+						storageKey: "att-1-notes.pdf",
+					},
+				],
+			}),
+		);
+	});
+
 	it("prefers the task card agent when launching a session", async () => {
 		let latestSnapshot: HookSnapshot | null = null;
 
