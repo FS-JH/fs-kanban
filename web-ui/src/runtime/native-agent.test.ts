@@ -7,10 +7,11 @@ function createRuntimeConfigResponse(
 	selectedAgentId: RuntimeConfigResponse["selectedAgentId"],
 	overrides?: Partial<RuntimeConfigResponse>,
 ): RuntimeConfigResponse {
-	return {
+	const base: RuntimeConfigResponse = {
 		selectedAgentId,
 		fallbackAgentId: null,
 		selectedShortcutLabel: null,
+		agentApprovalMode: "full_auto",
 		agentAutonomousModeEnabled: true,
 		effectiveCommand: selectedAgentId,
 		globalConfigPath: "/tmp/global-config.json",
@@ -42,7 +43,13 @@ function createRuntimeConfigResponse(
 		openPrPromptTemplate: "",
 		commitPromptTemplateDefault: "",
 		openPrPromptTemplateDefault: "",
-		...overrides,
+	};
+	const merged = { ...base, ...overrides };
+	const agentApprovalMode = merged.agentApprovalMode;
+	return {
+		...merged,
+		agentApprovalMode,
+		agentAutonomousModeEnabled: agentApprovalMode === "full_auto",
 	};
 }
 

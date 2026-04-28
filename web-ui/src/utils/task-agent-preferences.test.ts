@@ -9,10 +9,11 @@ import {
 } from "@/utils/task-agent-preferences";
 
 function createRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): RuntimeConfigResponse {
-	return {
+	const base: RuntimeConfigResponse = {
 		selectedAgentId: "codex",
 		fallbackAgentId: "claude",
 		selectedShortcutLabel: null,
+		agentApprovalMode: "full_auto",
 		agentAutonomousModeEnabled: true,
 		effectiveCommand: "codex",
 		globalConfigPath: "/tmp/global-config.json",
@@ -44,7 +45,13 @@ function createRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): Ru
 		openPrPromptTemplate: "pr",
 		commitPromptTemplateDefault: "commit",
 		openPrPromptTemplateDefault: "pr",
-		...overrides,
+	};
+	const merged = { ...base, ...overrides };
+	const agentApprovalMode = merged.agentApprovalMode;
+	return {
+		...merged,
+		agentApprovalMode,
+		agentAutonomousModeEnabled: agentApprovalMode === "full_auto",
 	};
 }
 

@@ -63,10 +63,11 @@ function createSummary(taskId: string, agentId: RuntimeTaskSessionSummary["agent
 }
 
 function createRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): RuntimeConfigResponse {
-	return {
+	const base: RuntimeConfigResponse = {
 		selectedAgentId: "codex",
 		fallbackAgentId: null,
 		selectedShortcutLabel: null,
+		agentApprovalMode: "full_auto",
 		agentAutonomousModeEnabled: true,
 		effectiveCommand: "codex --dangerously-bypass-approvals-and-sandbox",
 		globalConfigPath: "/tmp/global-config.json",
@@ -98,7 +99,13 @@ function createRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): Ru
 		openPrPromptTemplate: "pr",
 		commitPromptTemplateDefault: "commit",
 		openPrPromptTemplateDefault: "pr",
-		...overrides,
+	};
+	const merged = { ...base, ...overrides };
+	const agentApprovalMode = merged.agentApprovalMode;
+	return {
+		...merged,
+		agentApprovalMode,
+		agentAutonomousModeEnabled: agentApprovalMode === "full_auto",
 	};
 }
 
@@ -153,10 +160,12 @@ describe("useHomeAgentSession", () => {
 	beforeEach(() => {
 		startTaskSessionMutateMock.mockReset();
 		stopTaskSessionMutateMock.mockReset();
-		startTaskSessionMutateMock.mockImplementation(async ({ taskId, agentId }: { taskId: string; agentId: "codex" | "claude" }) => ({
-			ok: true,
-			summary: createSummary(taskId, agentId),
-		}));
+		startTaskSessionMutateMock.mockImplementation(
+			async ({ taskId, agentId }: { taskId: string; agentId: "codex" | "claude" }) => ({
+				ok: true,
+				summary: createSummary(taskId, agentId),
+			}),
+		);
 		notifyErrorMock.mockReset();
 		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
 			.IS_REACT_ACT_ENVIRONMENT;

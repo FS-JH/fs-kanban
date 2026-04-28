@@ -7,10 +7,6 @@ import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { TRPCError } from "@trpc/server";
-import {
-	createRuntimeUserInstructionWatcher,
-	listRuntimeWorkflowSlashCommands,
-} from "../runtime/sdk-user-instructions.js";
 import type { RuntimeConfigState } from "../config/runtime-config.js";
 import { updateGlobalRuntimeConfig, updateRuntimeConfig } from "../config/runtime-config.js";
 import type { RuntimeCommandRunResponse } from "../core/api-contract.js";
@@ -23,6 +19,10 @@ import {
 	parseTaskSessionStopRequest,
 } from "../core/api-validation.js";
 import { isHomeAgentSessionId } from "../core/home-agent-session.js";
+import {
+	createRuntimeUserInstructionWatcher,
+	listRuntimeWorkflowSlashCommands,
+} from "../runtime/sdk-user-instructions.js";
 import { openInBrowser } from "../server/browser.js";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
@@ -138,6 +138,7 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 					agentId: resolved.agentId,
 					binary: resolved.binary,
 					args: resolved.args,
+					approvalMode: scopedRuntimeConfig.agentApprovalMode,
 					autonomousModeEnabled: scopedRuntimeConfig.agentAutonomousModeEnabled,
 					cwd: taskCwd,
 					prompt: body.prompt,

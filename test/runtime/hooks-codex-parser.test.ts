@@ -137,4 +137,35 @@ describe("parseCodexEventLine", () => {
 			},
 		});
 	});
+
+	it("captures structured permission prompt metadata for supervised approval", () => {
+		const state = createCodexWatcherState();
+
+		const event = parseCodexEventLine(
+			createCodexLogLine({
+				type: "approval_request",
+				id: "approval-1",
+				item: {
+					type: "function_call",
+					name: "Bash",
+					arguments: JSON.stringify({
+						cmd: "git status --short",
+					}),
+				},
+			}),
+			state,
+		);
+
+		expect(event).toEqual({
+			event: "to_review",
+			metadata: {
+				source: "codex",
+				activityText: "Waiting for approval",
+				hookEventName: "approval_request",
+				notificationType: "permission_prompt",
+				toolName: "Bash",
+				toolInputSummary: "git status --short",
+			},
+		});
+	});
 });

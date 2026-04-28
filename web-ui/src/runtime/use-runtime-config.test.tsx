@@ -19,6 +19,7 @@ function createRuntimeConfigResponse(selectedAgentId: RuntimeConfigResponse["sel
 		selectedAgentId,
 		fallbackAgentId: null,
 		selectedShortcutLabel: null,
+		agentApprovalMode: "full_auto",
 		agentAutonomousModeEnabled: true,
 		effectiveCommand: selectedAgentId,
 		globalConfigPath: "/tmp/global-config.json",
@@ -258,4 +259,4 @@ describe("useRuntimeConfig", () => {
 		expect(snapshot.config?.selectedAgentId).toBe("codex");
 		expect(snapshot.isLoading).toBe(false);
 	});
-	});
+});

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import type {
+	RuntimeAgentApprovalMode,
 	RuntimeAgentId,
 	RuntimeHookEvent,
 	RuntimeTaskAttachment,
@@ -22,6 +23,7 @@ export interface AgentAdapterLaunchInput {
 	agentId: RuntimeAgentId;
 	binary?: string;
 	args: string[];
+	approvalMode?: RuntimeAgentApprovalMode;
 	autonomousModeEnabled?: boolean;
 	cwd: string;
 	prompt: string;
@@ -63,6 +65,13 @@ interface HookCommandMetadata {
 
 interface AgentSessionAdapter {
 	prepare(input: AgentAdapterLaunchInput): Promise<PreparedAgentLaunch>;
+}
+
+function isFullAutoApprovalMode(input: AgentAdapterLaunchInput): boolean {
+	if (input.approvalMode) {
+		return input.approvalMode === "full_auto";
+	}
+	return input.autonomousModeEnabled === true;
 }
 
 function resolveHookContext(input: AgentAdapterLaunchInput): HookContext | null {
@@ -160,7 +169,7 @@ const claudeAdapter: AgentSessionAdapter = {
 		const env: Record<string, string | undefined> = {};
 		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId);
 		if (
-			input.autonomousModeEnabled &&
+			isFullAutoApprovalMode(input) &&
 			!input.startInPlanMode &&
 			!hasCliOption(args, "--dangerously-skip-permissions")
 		) {
@@ -276,9 +285,7 @@ function codexPromptDetector(data: string, summary: RuntimeTaskSessionSummary): 
 function shouldInspectCodexOutputForTransition(summary: RuntimeTaskSessionSummary): boolean {
 	return (
 		summary.state === "awaiting_review" &&
-		(summary.reviewReason === "attention" ||
-			summary.reviewReason === "hook" ||
-			summary.reviewReason === "error")
+		(summary.reviewReason === "attention" || summary.reviewReason === "hook" || summary.reviewReason === "error")
 	);
 }
 
@@ -289,7 +296,7 @@ const codexAdapter: AgentSessionAdapter = {
 		let binary = input.binary;
 		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId);
 
-		if (input.autonomousModeEnabled && !hasCliOption(codexArgs, "--dangerously-bypass-approvals-and-sandbox")) {
+		if (isFullAutoApprovalMode(input) && !hasCliOption(codexArgs, "--dangerously-bypass-approvals-and-sandbox")) {
 			codexArgs.push("--dangerously-bypass-approvals-and-sandbox");
 		}
 

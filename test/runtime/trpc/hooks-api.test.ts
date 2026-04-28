@@ -55,6 +55,7 @@ describe("createHooksApi", () => {
 			transitionToReview: vi.fn(),
 			transitionToRunning: vi.fn(),
 			applyHookActivity: vi.fn(),
+			maybeAutoApprovePendingPrompt: vi.fn(),
 			applyTurnCheckpoint: vi.fn(),
 		} as unknown as TerminalSessionManager;
 
@@ -82,6 +83,7 @@ describe("createHooksApi", () => {
 			source: "claude",
 			activityText: "Using Read",
 		});
+		expect(manager.maybeAutoApprovePendingPrompt).toHaveBeenCalledWith("task-1");
 	});
 
 	it("captures a turn checkpoint when transitioning to review", async () => {
@@ -144,5 +146,53 @@ describe("createHooksApi", () => {
 			cwd: "/tmp/worktree",
 			ref: "refs/kanban/checkpoints/task-1/turn/1",
 		});
+	});
+
+	it("does not raise ready-for-review notifications for permission prompts", async () => {
+		const transitionedSummary = createSummary({
+			state: "awaiting_review",
+			reviewReason: "hook",
+		});
+		const broadcastTaskReadyForReview = vi.fn();
+		const manager = {
+			getSummary: vi.fn(() => createSummary({ state: "running" })),
+			transitionToReview: vi.fn(() => transitionedSummary),
+			transitionToRunning: vi.fn(),
+			applyHookActivity: vi.fn(),
+			applyTurnCheckpoint: vi.fn(),
+			maybeAutoApprovePendingPrompt: vi.fn(() => true),
+		} as unknown as TerminalSessionManager;
+
+		const api = createHooksApi({
+			getWorkspacePathById: vi.fn(() => "/tmp/repo"),
+			ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
+			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
+			broadcastTaskReadyForReview,
+			captureTaskTurnCheckpoint: vi.fn(async () => ({
+				turn: 1,
+				ref: "refs/kanban/checkpoints/task-1/turn/1",
+				commit: "1111111",
+				createdAt: Date.now(),
+			})),
+			deleteTaskTurnCheckpointRef: vi.fn(async () => undefined),
+		});
+
+		const response = await api.ingest({
+			taskId: "task-1",
+			workspaceId: "workspace-1",
+			event: "to_review",
+			metadata: {
+				activityText: "Waiting for approval",
+				hookEventName: "approval_request",
+				notificationType: "permission_prompt",
+				toolName: "Read",
+				toolInputSummary: "src/index.ts",
+				source: "codex",
+			},
+		});
+
+		expect(response).toEqual({ ok: true });
+		expect(manager.maybeAutoApprovePendingPrompt).toHaveBeenCalledWith("task-1");
+		expect(broadcastTaskReadyForReview).not.toHaveBeenCalled();
 	});
 });

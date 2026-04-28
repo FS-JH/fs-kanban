@@ -1,12 +1,11 @@
 // Settings dialog composition for FS Kanban.
 // Generic app settings live here, while agent-specific launch details stay in
 // focused runtime helpers instead of accumulating in the dialog.
-import * as RadixCheckbox from "@radix-ui/react-checkbox";
 import * as RadixPopover from "@radix-ui/react-popover";
 import * as RadixSwitch from "@radix-ui/react-switch";
 import { getRuntimeAgentCatalogEntry, getRuntimeLaunchSupportedAgentCatalog } from "@runtime-agent-catalog";
 import { areRuntimeProjectShortcutsEqual } from "@runtime-shortcuts";
-import { Check, ChevronDown, Circle, CircleDot, ExternalLink, Plus, Settings, X } from "lucide-react";
+import { ChevronDown, Circle, CircleDot, ExternalLink, Plus, Settings, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	getRuntimeShortcutIconComponent,
@@ -20,7 +19,12 @@ import { cn } from "@/components/ui/cn";
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { TASK_GIT_BASE_REF_PROMPT_VARIABLE, type TaskGitAction } from "@/git-actions/build-task-git-action-prompt";
 import { openFileOnHost } from "@/runtime/runtime-config-query";
-import type { RuntimeAgentId, RuntimeConfigResponse, RuntimeProjectShortcut } from "@/runtime/types";
+import type {
+	RuntimeAgentApprovalMode,
+	RuntimeAgentId,
+	RuntimeConfigResponse,
+	RuntimeProjectShortcut,
+} from "@/runtime/types";
 import { useRuntimeConfig } from "@/runtime/use-runtime-config";
 import {
 	type BrowserNotificationPermission,
@@ -45,8 +49,12 @@ function quoteCommandPartForDisplay(part: string): string {
 	return JSON.stringify(part);
 }
 
-function buildDisplayedAgentCommand(agentId: RuntimeAgentId, binary: string, autonomousModeEnabled: boolean): string {
-	const args = autonomousModeEnabled ? (getRuntimeAgentCatalogEntry(agentId)?.autonomousArgs ?? []) : [];
+function buildDisplayedAgentCommand(
+	agentId: RuntimeAgentId,
+	binary: string,
+	approvalMode: RuntimeAgentApprovalMode,
+): string {
+	const args = approvalMode === "full_auto" ? (getRuntimeAgentCatalogEntry(agentId)?.autonomousArgs ?? []) : [];
 	return [binary, ...args.map(quoteCommandPartForDisplay)].join(" ");
 }
 
@@ -83,6 +91,34 @@ const GIT_PROMPT_VARIANT_OPTIONS: Array<{ value: TaskGitAction; label: string }>
 export type RuntimeSettingsSection = "shortcuts";
 
 const SETTINGS_AGENT_ORDER: readonly RuntimeAgentId[] = ["codex", "claude"];
+const AGENT_APPROVAL_MODE_OPTIONS: Array<{
+	value: RuntimeAgentApprovalMode;
+	label: string;
+	description: string;
+}> = [
+	{
+		value: "manual",
+		label: "Manual",
+		description: "Stop on every permission prompt and wait for you.",
+	},
+	{
+		value: "supervised",
+		label: "Supervised",
+		description: "Auto-approve only clearly safe read-only steps. Risky or ambiguous prompts still stop.",
+	},
+	{
+		value: "full_auto",
+		label: "Full auto",
+		description: "Pass the CLI bypass flags and skip permission prompts entirely.",
+	},
+];
+
+function resolveAgentApprovalMode(config: RuntimeConfigResponse | null | undefined): RuntimeAgentApprovalMode {
+	if (config?.agentApprovalMode) {
+		return config.agentApprovalMode;
+	}
+	return config?.agentAutonomousModeEnabled === false ? "manual" : "full_auto";
+}
 
 function getShortcutIconOption(icon: string | undefined): RuntimeShortcutIconOption {
 	return getRuntimeShortcutPickerOption(icon);
@@ -305,7 +341,7 @@ export function RuntimeSettingsDialog({
 	const { config, isLoading, isSaving, save } = useRuntimeConfig(open, workspaceId, initialConfig);
 	const [selectedAgentId, setSelectedAgentId] = useState<RuntimeAgentId>("claude");
 	const [fallbackAgentId, setFallbackAgentId] = useState<RuntimeAgentId | null>(null);
-	const [agentAutonomousModeEnabled, setAgentAutonomousModeEnabled] = useState(true);
+	const [agentApprovalMode, setAgentApprovalMode] = useState<RuntimeAgentApprovalMode>("full_auto");
 	const [agentAttentionNotificationsEnabled, setAgentAttentionNotificationsEnabled] = useState(true);
 	const [agentAttentionSoundEnabled, setAgentAttentionSoundEnabled] = useState(false);
 	const [readyForReviewNotificationsEnabled, setReadyForReviewNotificationsEnabled] = useState(true);
@@ -336,7 +372,6 @@ export function RuntimeSettingsDialog({
 		selectedPromptVariant === "commit" ? isCommitPromptAtDefault : isOpenPrPromptAtDefault;
 	const selectedPromptPlaceholder =
 		selectedPromptVariant === "commit" ? "Commit prompt template" : "PR prompt template";
-	const bypassPermissionsCheckboxId = "runtime-settings-bypass-permissions";
 	const refreshNotificationPermission = useCallback(() => {
 		setNotificationPermission(getBrowserNotificationPermission());
 	}, []);
@@ -363,9 +398,9 @@ export function RuntimeSettingsDialog({
 		});
 		return orderedAgents.map((agent) => ({
 			...agent,
-			command: buildDisplayedAgentCommand(agent.id, agent.binary, agentAutonomousModeEnabled),
+			command: buildDisplayedAgentCommand(agent.id, agent.binary, agentApprovalMode),
 		}));
-	}, [agentAutonomousModeEnabled, config?.agents]);
+	}, [agentApprovalMode, config?.agents]);
 	const displayedAgents = useMemo(() => supportedAgents, [supportedAgents]);
 	const configuredAgentId = config?.selectedAgentId ?? null;
 	const configuredFallbackAgentId = config?.fallbackAgentId ?? null;
@@ -373,7 +408,7 @@ export function RuntimeSettingsDialog({
 	const fallbackSelectedAgentId = firstInstalledAgentId ?? displayedAgents[0]?.id ?? "claude";
 	const initialSelectedAgentId = configuredAgentId ?? fallbackSelectedAgentId;
 	const initialFallbackAgentId = configuredFallbackAgentId;
-	const initialAgentAutonomousModeEnabled = config?.agentAutonomousModeEnabled ?? true;
+	const initialAgentApprovalMode = resolveAgentApprovalMode(config);
 	const initialAgentAttentionNotificationsEnabled = config?.agentAttentionNotificationsEnabled ?? true;
 	const initialAgentAttentionSoundEnabled = config?.agentAttentionSoundEnabled ?? false;
 	const initialReadyForReviewNotificationsEnabled = config?.readyForReviewNotificationsEnabled ?? true;
@@ -390,7 +425,7 @@ export function RuntimeSettingsDialog({
 		if (fallbackAgentId !== initialFallbackAgentId) {
 			return true;
 		}
-		if (agentAutonomousModeEnabled !== initialAgentAutonomousModeEnabled) {
+		if (agentApprovalMode !== initialAgentApprovalMode) {
 			return true;
 		}
 		if (agentAttentionNotificationsEnabled !== initialAgentAttentionNotificationsEnabled) {
@@ -416,12 +451,12 @@ export function RuntimeSettingsDialog({
 			normalizeTemplateForComparison(initialOpenPrPromptTemplate)
 		);
 	}, [
-		agentAutonomousModeEnabled,
+		agentApprovalMode,
 		commitPromptTemplate,
 		config,
 		initialAgentAttentionNotificationsEnabled,
 		initialAgentAttentionSoundEnabled,
-		initialAgentAutonomousModeEnabled,
+		initialAgentApprovalMode,
 		initialFallbackAgentId,
 		initialCommitPromptTemplate,
 		initialOpenPrPromptTemplate,
@@ -443,7 +478,7 @@ export function RuntimeSettingsDialog({
 		}
 		setSelectedAgentId(configuredAgentId ?? fallbackSelectedAgentId);
 		setFallbackAgentId(config?.fallbackAgentId ?? null);
-		setAgentAutonomousModeEnabled(config?.agentAutonomousModeEnabled ?? true);
+		setAgentApprovalMode(resolveAgentApprovalMode(config));
 		setAgentAttentionNotificationsEnabled(config?.agentAttentionNotificationsEnabled ?? true);
 		setAgentAttentionSoundEnabled(config?.agentAttentionSoundEnabled ?? false);
 		setReadyForReviewNotificationsEnabled(config?.readyForReviewNotificationsEnabled ?? true);
@@ -454,6 +489,7 @@ export function RuntimeSettingsDialog({
 	}, [
 		config?.agentAttentionNotificationsEnabled,
 		config?.agentAttentionSoundEnabled,
+		config?.agentApprovalMode,
 		config?.agentAutonomousModeEnabled,
 		config?.fallbackAgentId,
 		config?.commitPromptTemplate,
@@ -570,7 +606,8 @@ export function RuntimeSettingsDialog({
 		const saved = await save({
 			selectedAgentId,
 			fallbackAgentId: normalizedFallbackAgentId,
-			agentAutonomousModeEnabled,
+			agentApprovalMode,
+			agentAutonomousModeEnabled: agentApprovalMode === "full_auto",
 			agentAttentionNotificationsEnabled,
 			agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled,
@@ -665,32 +702,35 @@ export function RuntimeSettingsDialog({
 						Used as the first suggested alternate when retrying a failed or interrupted card.
 					</p>
 				</div>
-				<label
-					htmlFor={bypassPermissionsCheckboxId}
-					className="flex items-center gap-2 text-[13px] text-text-primary mt-2 cursor-pointer"
-				>
-					<RadixCheckbox.Root
-						id={bypassPermissionsCheckboxId}
-						aria-label="Enable bypass permissions flag"
-						checked={agentAutonomousModeEnabled}
-						disabled={controlsDisabled}
-						onCheckedChange={(checked) => setAgentAutonomousModeEnabled(checked === true)}
-						className="flex h-4 w-4 cursor-pointer items-center justify-center rounded border border-border bg-surface-2 data-[state=checked]:bg-accent data-[state=checked]:border-accent disabled:cursor-default disabled:opacity-40"
-					>
-						<RadixCheckbox.Indicator>
-							<Check size={12} className="text-white" />
-						</RadixCheckbox.Indicator>
-					</RadixCheckbox.Root>
-					<span>Full auto permissions bypass</span>
-				</label>
-				<p className="text-text-secondary text-[13px] ml-6 mt-0 mb-0">
-					Bypasses the agent’s permission prompts entirely. This is the current unsafe full-auto mode, not a
-					supervised approver.
-				</p>
-				<p className="text-text-secondary text-[12px] ml-6 mt-1 mb-0">
-					Supervised auto-approval, where another agent approves only safe next steps, still needs dedicated
-					runtime work.
-				</p>
+				<div className="mt-3">
+					<span className="mb-1 block text-[11px] text-text-secondary">Approval mode</span>
+					<div className="grid gap-2">
+						{AGENT_APPROVAL_MODE_OPTIONS.map((option) => {
+							const selected = agentApprovalMode === option.value;
+							return (
+								<button
+									key={option.value}
+									type="button"
+									disabled={controlsDisabled}
+									onClick={() => setAgentApprovalMode(option.value)}
+									className={cn(
+										"rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-40",
+										selected
+											? "border-border-focus bg-accent/10"
+											: "border-border bg-surface-2 hover:border-border-bright hover:bg-surface-3",
+									)}
+								>
+									<div className="text-[13px] text-text-primary">{option.label}</div>
+									<div className="mt-1 text-[12px] text-text-secondary">{option.description}</div>
+								</button>
+							);
+						})}
+					</div>
+					<p className="mt-2 mb-0 text-[12px] text-text-secondary">
+						Supervised mode only auto-approves narrow read-only prompts. Anything risky, write-capable, or
+						ambiguous still stops and needs you.
+					</p>
+				</div>
 
 				<div className="flex items-center justify-between mt-4 mb-1">
 					<h6 className="font-semibold text-text-primary m-0">Git button prompts</h6>

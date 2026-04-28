@@ -5,7 +5,7 @@ import { readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { isRuntimeAgentLaunchSupported } from "../core/agent-catalog.js";
-import type { RuntimeAgentId, RuntimeProjectShortcut } from "../core/api-contract.js";
+import type { RuntimeAgentApprovalMode, RuntimeAgentId, RuntimeProjectShortcut } from "../core/api-contract.js";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system.js";
 import { detectInstalledCommands } from "../terminal/agent-registry.js";
 import { areRuntimeProjectShortcutsEqual } from "./shortcut-utils.js";
@@ -14,6 +14,7 @@ interface RuntimeGlobalConfigFileShape {
 	selectedAgentId?: RuntimeAgentId;
 	fallbackAgentId?: RuntimeAgentId | null;
 	selectedShortcutLabel?: string;
+	agentApprovalMode?: RuntimeAgentApprovalMode;
 	agentAutonomousModeEnabled?: boolean;
 	agentAttentionNotificationsEnabled?: boolean;
 	agentAttentionSoundEnabled?: boolean;
@@ -32,6 +33,7 @@ export interface RuntimeConfigState {
 	selectedAgentId: RuntimeAgentId;
 	fallbackAgentId: RuntimeAgentId | null;
 	selectedShortcutLabel: string | null;
+	agentApprovalMode: RuntimeAgentApprovalMode;
 	agentAutonomousModeEnabled: boolean;
 	agentAttentionNotificationsEnabled: boolean;
 	agentAttentionSoundEnabled: boolean;
@@ -47,6 +49,7 @@ export interface RuntimeConfigUpdateInput {
 	selectedAgentId?: RuntimeAgentId;
 	fallbackAgentId?: RuntimeAgentId | null;
 	selectedShortcutLabel?: string | null;
+	agentApprovalMode?: RuntimeAgentApprovalMode;
 	agentAutonomousModeEnabled?: boolean;
 	agentAttentionNotificationsEnabled?: boolean;
 	agentAttentionSoundEnabled?: boolean;
@@ -64,7 +67,7 @@ const PROJECT_CONFIG_DIR = "";
 const PROJECT_CONFIG_FILENAME = "config.json";
 const DEFAULT_AGENT_ID: RuntimeAgentId = "codex";
 const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["codex", "claude"];
-const DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED = true;
+const DEFAULT_AGENT_APPROVAL_MODE: RuntimeAgentApprovalMode = "full_auto";
 const DEFAULT_AGENT_ATTENTION_NOTIFICATIONS_ENABLED = true;
 const DEFAULT_AGENT_ATTENTION_SOUND_ENABLED = false;
 const DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED = true;
@@ -198,6 +201,31 @@ function normalizeBoolean(value: unknown, fallback: boolean): boolean {
 	return fallback;
 }
 
+function normalizeApprovalMode(value: unknown, fallback: RuntimeAgentApprovalMode): RuntimeAgentApprovalMode {
+	if (value === "manual" || value === "supervised" || value === "full_auto") {
+		return value;
+	}
+	return fallback;
+}
+
+function resolveApprovalMode(
+	value: unknown,
+	legacyAutonomousModeEnabled: unknown,
+	fallback: RuntimeAgentApprovalMode,
+): RuntimeAgentApprovalMode {
+	if (value === "manual" || value === "supervised" || value === "full_auto") {
+		return value;
+	}
+	if (typeof legacyAutonomousModeEnabled === "boolean") {
+		return legacyAutonomousModeEnabled ? "full_auto" : "manual";
+	}
+	return fallback;
+}
+
+function isFullAutoApprovalMode(mode: RuntimeAgentApprovalMode): boolean {
+	return mode === "full_auto";
+}
+
 function normalizeShortcutLabel(value: unknown): string | null {
 	if (typeof value !== "string") {
 		return null;
@@ -292,9 +320,17 @@ function toRuntimeConfigState({
 			normalizeAgentId(globalConfig?.selectedAgentId),
 		),
 		selectedShortcutLabel: normalizeShortcutLabel(globalConfig?.selectedShortcutLabel),
-		agentAutonomousModeEnabled: normalizeBoolean(
+		agentApprovalMode: resolveApprovalMode(
+			globalConfig?.agentApprovalMode,
 			globalConfig?.agentAutonomousModeEnabled,
-			DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED,
+			DEFAULT_AGENT_APPROVAL_MODE,
+		),
+		agentAutonomousModeEnabled: isFullAutoApprovalMode(
+			resolveApprovalMode(
+				globalConfig?.agentApprovalMode,
+				globalConfig?.agentAutonomousModeEnabled,
+				DEFAULT_AGENT_APPROVAL_MODE,
+			),
 		),
 		agentAttentionNotificationsEnabled: normalizeBoolean(
 			globalConfig?.agentAttentionNotificationsEnabled,
@@ -334,6 +370,7 @@ async function writeRuntimeGlobalConfigFile(
 		selectedAgentId?: RuntimeAgentId;
 		fallbackAgentId?: RuntimeAgentId | null;
 		selectedShortcutLabel?: string | null;
+		agentApprovalMode?: RuntimeAgentApprovalMode;
 		agentAutonomousModeEnabled?: boolean;
 		agentAttentionNotificationsEnabled?: boolean;
 		agentAttentionSoundEnabled?: boolean;
@@ -360,10 +397,22 @@ async function writeRuntimeGlobalConfigFile(
 	const existingSelectedShortcutLabel = hasOwnKey(existing, "selectedShortcutLabel")
 		? normalizeShortcutLabel(existing?.selectedShortcutLabel)
 		: undefined;
-	const agentAutonomousModeEnabled =
-		config.agentAutonomousModeEnabled === undefined
-			? DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED
-			: normalizeBoolean(config.agentAutonomousModeEnabled, DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED);
+	const existingAgentApprovalMode =
+		hasOwnKey(existing, "agentApprovalMode") || hasOwnKey(existing, "agentAutonomousModeEnabled")
+			? resolveApprovalMode(
+					existing?.agentApprovalMode,
+					existing?.agentAutonomousModeEnabled,
+					DEFAULT_AGENT_APPROVAL_MODE,
+				)
+			: undefined;
+	const agentApprovalMode =
+		config.agentApprovalMode === undefined && config.agentAutonomousModeEnabled === undefined
+			? (existingAgentApprovalMode ?? DEFAULT_AGENT_APPROVAL_MODE)
+			: resolveApprovalMode(
+					config.agentApprovalMode,
+					config.agentAutonomousModeEnabled,
+					DEFAULT_AGENT_APPROVAL_MODE,
+				);
 	const agentAttentionNotificationsEnabled =
 		config.agentAttentionNotificationsEnabled === undefined
 			? DEFAULT_AGENT_ATTENTION_NOTIFICATIONS_ENABLED
@@ -408,10 +457,11 @@ async function writeRuntimeGlobalConfigFile(
 		payload.selectedShortcutLabel = existingSelectedShortcutLabel;
 	}
 	if (
+		hasOwnKey(existing, "agentApprovalMode") ||
 		hasOwnKey(existing, "agentAutonomousModeEnabled") ||
-		agentAutonomousModeEnabled !== DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED
+		agentApprovalMode !== DEFAULT_AGENT_APPROVAL_MODE
 	) {
-		payload.agentAutonomousModeEnabled = agentAutonomousModeEnabled;
+		payload.agentApprovalMode = agentApprovalMode;
 	}
 	if (
 		hasOwnKey(existing, "agentAttentionNotificationsEnabled") ||
@@ -515,7 +565,7 @@ function createRuntimeConfigStateFromValues(input: {
 	selectedAgentId: RuntimeAgentId;
 	fallbackAgentId: RuntimeAgentId | null;
 	selectedShortcutLabel: string | null;
-	agentAutonomousModeEnabled: boolean;
+	agentApprovalMode: RuntimeAgentApprovalMode;
 	agentAttentionNotificationsEnabled: boolean;
 	agentAttentionSoundEnabled: boolean;
 	readyForReviewNotificationsEnabled: boolean;
@@ -529,9 +579,9 @@ function createRuntimeConfigStateFromValues(input: {
 		selectedAgentId: normalizeAgentId(input.selectedAgentId),
 		fallbackAgentId: normalizeFallbackAgentId(input.fallbackAgentId, normalizeAgentId(input.selectedAgentId)),
 		selectedShortcutLabel: normalizeShortcutLabel(input.selectedShortcutLabel),
-		agentAutonomousModeEnabled: normalizeBoolean(
-			input.agentAutonomousModeEnabled,
-			DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED,
+		agentApprovalMode: normalizeApprovalMode(input.agentApprovalMode, DEFAULT_AGENT_APPROVAL_MODE),
+		agentAutonomousModeEnabled: isFullAutoApprovalMode(
+			normalizeApprovalMode(input.agentApprovalMode, DEFAULT_AGENT_APPROVAL_MODE),
 		),
 		agentAttentionNotificationsEnabled: normalizeBoolean(
 			input.agentAttentionNotificationsEnabled,
@@ -560,7 +610,7 @@ export function toGlobalRuntimeConfigState(current: RuntimeConfigState): Runtime
 		selectedAgentId: current.selectedAgentId,
 		fallbackAgentId: current.fallbackAgentId,
 		selectedShortcutLabel: current.selectedShortcutLabel,
-		agentAutonomousModeEnabled: current.agentAutonomousModeEnabled,
+		agentApprovalMode: current.agentApprovalMode,
 		agentAttentionNotificationsEnabled: current.agentAttentionNotificationsEnabled,
 		agentAttentionSoundEnabled: current.agentAttentionSoundEnabled,
 		readyForReviewNotificationsEnabled: current.readyForReviewNotificationsEnabled,
@@ -598,7 +648,7 @@ export async function saveRuntimeConfig(
 		selectedAgentId: RuntimeAgentId;
 		fallbackAgentId: RuntimeAgentId | null;
 		selectedShortcutLabel: string | null;
-		agentAutonomousModeEnabled: boolean;
+		agentApprovalMode: RuntimeAgentApprovalMode;
 		agentAttentionNotificationsEnabled: boolean;
 		agentAttentionSoundEnabled: boolean;
 		readyForReviewNotificationsEnabled: boolean;
@@ -613,7 +663,7 @@ export async function saveRuntimeConfig(
 			selectedAgentId: config.selectedAgentId,
 			fallbackAgentId: config.fallbackAgentId,
 			selectedShortcutLabel: config.selectedShortcutLabel,
-			agentAutonomousModeEnabled: config.agentAutonomousModeEnabled,
+			agentApprovalMode: config.agentApprovalMode,
 			agentAttentionNotificationsEnabled: config.agentAttentionNotificationsEnabled,
 			agentAttentionSoundEnabled: config.agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled: config.readyForReviewNotificationsEnabled,
@@ -627,7 +677,7 @@ export async function saveRuntimeConfig(
 			selectedAgentId: config.selectedAgentId,
 			fallbackAgentId: config.fallbackAgentId,
 			selectedShortcutLabel: config.selectedShortcutLabel,
-			agentAutonomousModeEnabled: config.agentAutonomousModeEnabled,
+			agentApprovalMode: config.agentApprovalMode,
 			agentAttentionNotificationsEnabled: config.agentAttentionNotificationsEnabled,
 			agentAttentionSoundEnabled: config.agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled: config.readyForReviewNotificationsEnabled,
@@ -653,7 +703,14 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 					: normalizeFallbackAgentId(updates.fallbackAgentId, updates.selectedAgentId ?? current.selectedAgentId),
 			selectedShortcutLabel:
 				updates.selectedShortcutLabel === undefined ? current.selectedShortcutLabel : updates.selectedShortcutLabel,
-			agentAutonomousModeEnabled: updates.agentAutonomousModeEnabled ?? current.agentAutonomousModeEnabled,
+			agentApprovalMode:
+				updates.agentApprovalMode === undefined && updates.agentAutonomousModeEnabled === undefined
+					? current.agentApprovalMode
+					: resolveApprovalMode(
+							updates.agentApprovalMode,
+							updates.agentAutonomousModeEnabled,
+							current.agentApprovalMode,
+						),
 			agentAttentionNotificationsEnabled:
 				updates.agentAttentionNotificationsEnabled ?? current.agentAttentionNotificationsEnabled,
 			agentAttentionSoundEnabled: updates.agentAttentionSoundEnabled ?? current.agentAttentionSoundEnabled,
@@ -668,7 +725,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			nextConfig.selectedAgentId !== current.selectedAgentId ||
 			nextConfig.fallbackAgentId !== current.fallbackAgentId ||
 			nextConfig.selectedShortcutLabel !== current.selectedShortcutLabel ||
-			nextConfig.agentAutonomousModeEnabled !== current.agentAutonomousModeEnabled ||
+			nextConfig.agentApprovalMode !== current.agentApprovalMode ||
 			nextConfig.agentAttentionNotificationsEnabled !== current.agentAttentionNotificationsEnabled ||
 			nextConfig.agentAttentionSoundEnabled !== current.agentAttentionSoundEnabled ||
 			nextConfig.readyForReviewNotificationsEnabled !== current.readyForReviewNotificationsEnabled ||
@@ -684,7 +741,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			selectedAgentId: nextConfig.selectedAgentId,
 			fallbackAgentId: nextConfig.fallbackAgentId,
 			selectedShortcutLabel: nextConfig.selectedShortcutLabel,
-			agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
+			agentApprovalMode: nextConfig.agentApprovalMode,
 			agentAttentionNotificationsEnabled: nextConfig.agentAttentionNotificationsEnabled,
 			agentAttentionSoundEnabled: nextConfig.agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
@@ -700,7 +757,7 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			selectedAgentId: nextConfig.selectedAgentId,
 			fallbackAgentId: nextConfig.fallbackAgentId,
 			selectedShortcutLabel: nextConfig.selectedShortcutLabel,
-			agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
+			agentApprovalMode: nextConfig.agentApprovalMode,
 			agentAttentionNotificationsEnabled: nextConfig.agentAttentionNotificationsEnabled,
 			agentAttentionSoundEnabled: nextConfig.agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
@@ -737,7 +794,14 @@ export async function updateGlobalRuntimeConfig(
 					updates.selectedShortcutLabel === undefined
 						? current.selectedShortcutLabel
 						: updates.selectedShortcutLabel,
-				agentAutonomousModeEnabled: updates.agentAutonomousModeEnabled ?? current.agentAutonomousModeEnabled,
+				agentApprovalMode:
+					updates.agentApprovalMode === undefined && updates.agentAutonomousModeEnabled === undefined
+						? current.agentApprovalMode
+						: resolveApprovalMode(
+								updates.agentApprovalMode,
+								updates.agentAutonomousModeEnabled,
+								current.agentApprovalMode,
+							),
 				agentAttentionNotificationsEnabled:
 					updates.agentAttentionNotificationsEnabled ?? current.agentAttentionNotificationsEnabled,
 				agentAttentionSoundEnabled: updates.agentAttentionSoundEnabled ?? current.agentAttentionSoundEnabled,
@@ -752,7 +816,7 @@ export async function updateGlobalRuntimeConfig(
 				nextConfig.selectedAgentId !== current.selectedAgentId ||
 				nextConfig.fallbackAgentId !== current.fallbackAgentId ||
 				nextConfig.selectedShortcutLabel !== current.selectedShortcutLabel ||
-				nextConfig.agentAutonomousModeEnabled !== current.agentAutonomousModeEnabled ||
+				nextConfig.agentApprovalMode !== current.agentApprovalMode ||
 				nextConfig.agentAttentionNotificationsEnabled !== current.agentAttentionNotificationsEnabled ||
 				nextConfig.agentAttentionSoundEnabled !== current.agentAttentionSoundEnabled ||
 				nextConfig.readyForReviewNotificationsEnabled !== current.readyForReviewNotificationsEnabled ||
@@ -767,7 +831,7 @@ export async function updateGlobalRuntimeConfig(
 				selectedAgentId: nextConfig.selectedAgentId,
 				fallbackAgentId: nextConfig.fallbackAgentId,
 				selectedShortcutLabel: nextConfig.selectedShortcutLabel,
-				agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
+				agentApprovalMode: nextConfig.agentApprovalMode,
 				agentAttentionNotificationsEnabled: nextConfig.agentAttentionNotificationsEnabled,
 				agentAttentionSoundEnabled: nextConfig.agentAttentionSoundEnabled,
 				readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
@@ -781,7 +845,7 @@ export async function updateGlobalRuntimeConfig(
 				selectedAgentId: nextConfig.selectedAgentId,
 				fallbackAgentId: nextConfig.fallbackAgentId,
 				selectedShortcutLabel: nextConfig.selectedShortcutLabel,
-				agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
+				agentApprovalMode: nextConfig.agentApprovalMode,
 				agentAttentionNotificationsEnabled: nextConfig.agentAttentionNotificationsEnabled,
 				agentAttentionSoundEnabled: nextConfig.agentAttentionSoundEnabled,
 				readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,

@@ -115,6 +115,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 					expect(state.selectedAgentId).toBe("codex");
 					const persisted = JSON.parse(readFileSync(getGlobalRuntimeConfigPath(tempHome), "utf8")) as {
 						selectedAgentId?: string;
+						agentApprovalMode?: string;
 						agentAutonomousModeEnabled?: boolean;
 						agentAttentionNotificationsEnabled?: boolean;
 						agentAttentionSoundEnabled?: boolean;
@@ -123,6 +124,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 						openPrPromptTemplate?: string;
 					};
 					expect(persisted.selectedAgentId).toBeUndefined();
+					expect(persisted.agentApprovalMode).toBeUndefined();
 					expect(persisted.agentAutonomousModeEnabled).toBeUndefined();
 					expect(persisted.agentAttentionNotificationsEnabled).toBeUndefined();
 					expect(persisted.agentAttentionSoundEnabled).toBeUndefined();
@@ -332,7 +334,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 					selectedAgentId: "codex",
 					fallbackAgentId: null,
 					selectedShortcutLabel: null,
-					agentAutonomousModeEnabled: true,
+					agentApprovalMode: "full_auto",
 					agentAttentionNotificationsEnabled: true,
 					agentAttentionSoundEnabled: false,
 					readyForReviewNotificationsEnabled: true,
@@ -343,6 +345,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 
 				const globalPayload = JSON.parse(readFileSync(getGlobalRuntimeConfigPath(tempHome), "utf8")) as {
 					selectedAgentId?: string;
+					agentApprovalMode?: string;
 					agentAutonomousModeEnabled?: boolean;
 					agentAttentionNotificationsEnabled?: boolean;
 					agentAttentionSoundEnabled?: boolean;
@@ -351,6 +354,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 					openPrPromptTemplate?: string;
 				};
 				expect(globalPayload.selectedAgentId).toBeUndefined();
+				expect(globalPayload.agentApprovalMode).toBeUndefined();
 				expect(globalPayload.agentAutonomousModeEnabled).toBeUndefined();
 				expect(globalPayload.agentAttentionNotificationsEnabled).toBeUndefined();
 				expect(globalPayload.agentAttentionSoundEnabled).toBeUndefined();
@@ -382,7 +386,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 					selectedAgentId: "codex",
 					fallbackAgentId: null,
 					selectedShortcutLabel: null,
-					agentAutonomousModeEnabled: true,
+					agentApprovalMode: "full_auto",
 					agentAttentionNotificationsEnabled: true,
 					agentAttentionSoundEnabled: false,
 					readyForReviewNotificationsEnabled: true,
@@ -412,7 +416,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 					selectedAgentId: "codex",
 					fallbackAgentId: null,
 					selectedShortcutLabel: null,
-					agentAutonomousModeEnabled: true,
+					agentApprovalMode: "full_auto",
 					agentAttentionNotificationsEnabled: true,
 					agentAttentionSoundEnabled: false,
 					readyForReviewNotificationsEnabled: true,
@@ -454,7 +458,7 @@ describe.sequential("runtime-config auto agent selection", () => {
 		}
 	});
 
-	it("persists autonomous mode when disabled", async () => {
+	it("persists approval mode when manual mode is selected", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-autonomous-disabled-");
 		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
 			"kanban-project-runtime-config-autonomous-disabled-",
@@ -463,17 +467,49 @@ describe.sequential("runtime-config auto agent selection", () => {
 		try {
 			await withTemporaryEnv({ home: tempHome }, async () => {
 				const updated = await updateRuntimeConfig(tempProject, {
-					agentAutonomousModeEnabled: false,
+					agentApprovalMode: "manual",
 				});
+				expect(updated.agentApprovalMode).toBe("manual");
 				expect(updated.agentAutonomousModeEnabled).toBe(false);
 
 				const globalPayload = JSON.parse(readFileSync(getGlobalRuntimeConfigPath(tempHome), "utf8")) as {
+					agentApprovalMode?: string;
 					agentAutonomousModeEnabled?: boolean;
 				};
-				expect(globalPayload.agentAutonomousModeEnabled).toBe(false);
+				expect(globalPayload.agentApprovalMode).toBe("manual");
+				expect(globalPayload.agentAutonomousModeEnabled).toBeUndefined();
 
 				const reloaded = await loadRuntimeConfig(tempProject);
+				expect(reloaded.agentApprovalMode).toBe("manual");
 				expect(reloaded.agentAutonomousModeEnabled).toBe(false);
+			});
+		} finally {
+			cleanupProject();
+			cleanupHome();
+		}
+	});
+
+	it("maps legacy autonomous mode config into the new approval mode", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-legacy-auto-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-legacy-auto-",
+		);
+
+		try {
+			const runtimeConfigDir = join(tempHome, ".config", "fs-kanban");
+			mkdirSync(runtimeConfigDir, { recursive: true });
+			writeFileSync(
+				join(runtimeConfigDir, "config.json"),
+				JSON.stringify({
+					agentAutonomousModeEnabled: false,
+				}),
+				"utf8",
+			);
+
+			await withTemporaryEnv({ home: tempHome }, async () => {
+				const state = await loadRuntimeConfig(tempProject);
+				expect(state.agentApprovalMode).toBe("manual");
+				expect(state.agentAutonomousModeEnabled).toBe(false);
 			});
 		} finally {
 			cleanupProject();
@@ -494,15 +530,17 @@ describe.sequential("runtime-config auto agent selection", () => {
 						selectedAgentId: "codex",
 					}),
 					updateRuntimeConfig(tempProject, {
-						agentAutonomousModeEnabled: false,
+						agentApprovalMode: "manual",
 					}),
 				]);
 
 				expect(selectedAgentState.selectedAgentId).toBe("codex");
+				expect(autonomousModeState.agentApprovalMode).toBe("manual");
 				expect(autonomousModeState.agentAutonomousModeEnabled).toBe(false);
 
 				const reloaded = await loadRuntimeConfig(tempProject);
 				expect(reloaded.selectedAgentId).toBe("codex");
+				expect(reloaded.agentApprovalMode).toBe("manual");
 				expect(reloaded.agentAutonomousModeEnabled).toBe(false);
 			});
 		} finally {

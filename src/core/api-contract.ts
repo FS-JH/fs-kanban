@@ -76,6 +76,9 @@ export type RuntimeAgentId = z.infer<typeof runtimeAgentIdSchema>;
 export const runtimeLaunchSupportedAgentIdSchema = runtimeAgentIdSchema;
 export type RuntimeLaunchSupportedAgentId = z.infer<typeof runtimeLaunchSupportedAgentIdSchema>;
 
+export const runtimeAgentApprovalModeSchema = z.enum(["manual", "supervised", "full_auto"]);
+export type RuntimeAgentApprovalMode = z.infer<typeof runtimeAgentApprovalModeSchema>;
+
 export const runtimeBoardColumnIdSchema = z.enum(["backlog", "in_progress", "review", "trash"]);
 export type RuntimeBoardColumnId = z.infer<typeof runtimeBoardColumnIdSchema>;
 
@@ -718,6 +721,7 @@ export const runtimeConfigResponseSchema = z.object({
 	selectedAgentId: runtimeAgentIdSchema,
 	fallbackAgentId: runtimeAgentIdSchema.nullable(),
 	selectedShortcutLabel: z.string().nullable(),
+	agentApprovalMode: runtimeAgentApprovalModeSchema,
 	agentAutonomousModeEnabled: z.boolean(),
 	agentAttentionNotificationsEnabled: z.boolean().optional(),
 	agentAttentionSoundEnabled: z.boolean().optional(),
@@ -740,6 +744,7 @@ export const runtimeConfigSaveRequestSchema = z.object({
 	selectedAgentId: runtimeAgentIdSchema.optional(),
 	fallbackAgentId: runtimeAgentIdSchema.nullable().optional(),
 	selectedShortcutLabel: z.string().nullable().optional(),
+	agentApprovalMode: runtimeAgentApprovalModeSchema.optional(),
 	agentAutonomousModeEnabled: z.boolean().optional(),
 	agentAttentionNotificationsEnabled: z.boolean().optional(),
 	agentAttentionSoundEnabled: z.boolean().optional(),

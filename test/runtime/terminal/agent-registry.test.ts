@@ -18,12 +18,13 @@ import {
 } from "../../../src/terminal/agent-registry.js";
 
 function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): RuntimeConfigState {
-	return {
+	const base: RuntimeConfigState = {
 		globalConfigPath: "/tmp/global-config.json",
 		projectConfigPath: "/tmp/project-config.json",
 		selectedAgentId: "claude",
 		fallbackAgentId: null,
 		selectedShortcutLabel: null,
+		agentApprovalMode: "full_auto",
 		agentAutonomousModeEnabled: true,
 		agentAttentionNotificationsEnabled: true,
 		agentAttentionSoundEnabled: false,
@@ -33,7 +34,13 @@ function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): 
 		openPrPromptTemplate: "pr",
 		commitPromptTemplateDefault: "commit",
 		openPrPromptTemplateDefault: "pr",
-		...overrides,
+	};
+	const merged = { ...base, ...overrides };
+	const agentApprovalMode = merged.agentApprovalMode;
+	return {
+		...merged,
+		agentApprovalMode,
+		agentAutonomousModeEnabled: agentApprovalMode === "full_auto",
 	};
 }
 
@@ -85,11 +92,12 @@ describe("agent-registry", () => {
 describe("buildRuntimeConfigResponse", () => {
 	it("keeps curated agent default args independent of autonomous mode", () => {
 		const config = createRuntimeConfigState({
-			agentAutonomousModeEnabled: true,
+			agentApprovalMode: "full_auto",
 		});
 
 		const response = buildRuntimeConfigResponse(config);
 
+		expect(response.agentApprovalMode).toBe("full_auto");
 		expect(response.agentAutonomousModeEnabled).toBe(true);
 		expect(response.agents.map((agent) => agent.id)).toEqual(["codex", "claude"]);
 		expect(response.agents.find((agent) => agent.id === "claude")?.defaultArgs).toEqual([]);
@@ -98,7 +106,7 @@ describe("buildRuntimeConfigResponse", () => {
 
 	it("omits autonomous flags from curated agent commands when disabled", () => {
 		const config = createRuntimeConfigState({
-			agentAutonomousModeEnabled: false,
+			agentApprovalMode: "manual",
 		});
 		commandDiscoveryMocks.isBinaryAvailableOnPath.mockImplementation((binary: string) => binary === "claude");
 		commandDiscoveryMocks.resolveBinaryLocation.mockImplementation((binary: string) =>
@@ -107,6 +115,7 @@ describe("buildRuntimeConfigResponse", () => {
 
 		const response = buildRuntimeConfigResponse(config);
 
+		expect(response.agentApprovalMode).toBe("manual");
 		expect(response.agentAutonomousModeEnabled).toBe(false);
 		expect(response.agents.map((agent) => agent.id)).toEqual(["codex", "claude"]);
 		expect(response.agents.find((agent) => agent.id === "claude")?.defaultArgs).toEqual([]);
