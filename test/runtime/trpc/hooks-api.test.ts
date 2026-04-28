@@ -154,6 +154,12 @@ describe("createHooksApi", () => {
 			reviewReason: "hook",
 		});
 		const broadcastTaskReadyForReview = vi.fn();
+		const captureTaskTurnCheckpoint = vi.fn(async () => ({
+			turn: 1,
+			ref: "refs/kanban/checkpoints/task-1/turn/1",
+			commit: "1111111",
+			createdAt: Date.now(),
+		}));
 		const manager = {
 			getSummary: vi.fn(() => createSummary({ state: "running" })),
 			transitionToReview: vi.fn(() => transitionedSummary),
@@ -168,12 +174,7 @@ describe("createHooksApi", () => {
 			ensureTerminalManagerForWorkspace: vi.fn(async () => manager),
 			broadcastRuntimeWorkspaceStateUpdated: vi.fn(),
 			broadcastTaskReadyForReview,
-			captureTaskTurnCheckpoint: vi.fn(async () => ({
-				turn: 1,
-				ref: "refs/kanban/checkpoints/task-1/turn/1",
-				commit: "1111111",
-				createdAt: Date.now(),
-			})),
+			captureTaskTurnCheckpoint,
 			deleteTaskTurnCheckpointRef: vi.fn(async () => undefined),
 		});
 
@@ -192,6 +193,7 @@ describe("createHooksApi", () => {
 		});
 
 		expect(response).toEqual({ ok: true });
+		expect(captureTaskTurnCheckpoint).not.toHaveBeenCalled();
 		expect(manager.maybeAutoApprovePendingPrompt).toHaveBeenCalledWith("task-1");
 		expect(broadcastTaskReadyForReview).not.toHaveBeenCalled();
 	});

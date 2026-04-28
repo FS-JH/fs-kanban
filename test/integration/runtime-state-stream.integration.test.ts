@@ -948,6 +948,96 @@ describe.sequential("runtime state stream integration", () => {
 		}
 	}, 30_000);
 
+	it("does not emit task_ready_for_review for permission prompts", async () => {
+		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-hook-permission-stream-");
+		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-hook-permission-stream-");
+
+		mkdirSync(projectPath, { recursive: true });
+		initGitRepository(projectPath);
+
+		const port = await getAvailablePort();
+		const server = await startKanbanServer({
+			cwd: projectPath,
+			homeDir: tempHome,
+			port,
+		});
+
+		let stream: RuntimeStreamClient | null = null;
+
+		try {
+			const runtimeUrl = new URL(server.runtimeUrl);
+			const workspaceId = decodeURIComponent(runtimeUrl.pathname.slice(1));
+			expect(workspaceId).not.toBe("");
+
+			stream = await connectRuntimeStream(
+				`ws://127.0.0.1:${port}/api/runtime/ws?workspaceId=${encodeURIComponent(workspaceId)}`,
+			);
+			await stream.waitForMessage(
+				(message): message is RuntimeStateStreamSnapshotMessage => message.type === "snapshot",
+			);
+
+			const taskId = "hook-permission-task";
+			const startShellResponse = await requestJson<RuntimeShellSessionStartResponse>({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "runtime.startShellSession",
+				type: "mutation",
+				workspaceId,
+				payload: {
+					taskId,
+					baseRef: "HEAD",
+				},
+			});
+			expect(startShellResponse.status).toBe(200);
+			expect(startShellResponse.payload.ok).toBe(true);
+
+			const hookResponse = await requestJson<RuntimeHookIngestResponse>({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "hooks.ingest",
+				type: "mutation",
+				payload: {
+					taskId,
+					workspaceId,
+					event: "to_review",
+					metadata: {
+						source: "codex",
+						hookEventName: "approval_request",
+						notificationType: "permission_prompt",
+						activityText: "Waiting for approval",
+						toolName: "Read",
+						toolInputSummary: "README.md",
+					},
+				},
+			});
+			expect(hookResponse.status).toBe(200);
+			expect(hookResponse.payload.ok).toBe(true);
+
+			const messages = await stream.collectFor(500);
+			expect(
+				messages.some(
+					(message) =>
+						message.type === "task_ready_for_review" &&
+						message.workspaceId === workspaceId &&
+						message.taskId === taskId,
+				),
+			).toBe(false);
+
+			await requestJson({
+				baseUrl: `http://127.0.0.1:${port}`,
+				procedure: "runtime.stopTaskSession",
+				type: "mutation",
+				workspaceId,
+				payload: { taskId },
+			});
+		} finally {
+			if (stream) {
+				await stream.close();
+			}
+			await server.stop();
+			cleanupProject();
+			cleanupHome();
+		}
+	}, 30_000);
+
 	it("streams centralized workspace metadata updates for task worktrees", async () => {
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-metadata-stream-");
 		const { path: projectPath, cleanup: cleanupProject } = createTempDir("kanban-project-metadata-stream-");

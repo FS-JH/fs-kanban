@@ -86,7 +86,12 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 					} satisfies RuntimeHookIngestResponse;
 				}
 
-				if (event === "to_review") {
+				if (body.metadata) {
+					manager.applyHookActivity(taskId, body.metadata);
+				}
+
+				const isPermissionPrompt = event === "to_review" && isPermissionPromptActivity(body.metadata);
+				if (event === "to_review" && !isPermissionPrompt) {
 					const nextTurn = (transitionedSummary.latestTurnCheckpoint?.turn ?? 0) + 1;
 					const checkpointCwd = transitionedSummary.workspacePath ?? workspacePath;
 					const staleRef = transitionedSummary.previousTurnCheckpoint?.ref ?? null;
@@ -110,15 +115,12 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 					}
 				}
 
-				if (body.metadata) {
-					manager.applyHookActivity(taskId, body.metadata);
-				}
 				if (event === "to_review" && body.metadata) {
 					manager.maybeAutoApprovePendingPrompt(taskId);
 				}
 
 				void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceId, workspacePath);
-				if (event === "to_review" && !isPermissionPromptActivity(body.metadata)) {
+				if (event === "to_review" && !isPermissionPrompt) {
 					deps.broadcastTaskReadyForReview(workspaceId, taskId);
 				}
 
