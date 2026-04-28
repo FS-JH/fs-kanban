@@ -212,6 +212,7 @@ export function CardDetailView({
 	onSendReviewComments,
 	onMoveToTrash,
 	isMoveToTrashLoading,
+	sidebarPanel,
 	gitHistoryPanel,
 	onCloseGitHistory,
 	bottomTerminalOpen,
@@ -262,6 +263,7 @@ export function CardDetailView({
 	onSendReviewComments?: (taskId: string, text: string) => void;
 	onMoveToTrash: () => void;
 	isMoveToTrashLoading?: boolean;
+	sidebarPanel?: ReactNode;
 	gitHistoryPanel?: ReactNode;
 	onCloseGitHistory?: () => void;
 	bottomTerminalOpen: boolean;
@@ -507,28 +509,30 @@ export function CardDetailView({
 			}}
 		>
 			{!isDiffExpanded ? (
-				<ColumnContextPanel
-					selection={selection}
-					workspacePath={workspacePath}
-					onCardSelect={onCardSelect}
-					taskSessions={taskSessions}
-					onTaskDragEnd={onTaskDragEnd}
-					onCreateTask={onCreateTask}
-					onStartTask={onStartTask}
-					onStartAllTasks={onStartAllTasks}
-					onRunBacklogCleanup={onRunBacklogCleanup}
-					onClearTrash={onClearTrash}
-					editingTaskId={editingTaskId}
-					inlineTaskEditor={inlineTaskEditor}
-					onEditTask={onEditTask}
-					onCommitTask={onCommitTask}
-					onOpenPrTask={onOpenPrTask}
-					onMoveToTrashTask={onMoveReviewCardToTrash}
-					onRestoreFromTrashTask={onRestoreTaskFromTrash}
-					commitTaskLoadingById={commitTaskLoadingById}
-					openPrTaskLoadingById={openPrTaskLoadingById}
-					moveToTrashLoadingById={moveToTrashLoadingById}
-				/>
+				(sidebarPanel ?? (
+					<ColumnContextPanel
+						selection={selection}
+						workspacePath={workspacePath}
+						onCardSelect={onCardSelect}
+						taskSessions={taskSessions}
+						onTaskDragEnd={onTaskDragEnd}
+						onCreateTask={onCreateTask}
+						onStartTask={onStartTask}
+						onStartAllTasks={onStartAllTasks}
+						onRunBacklogCleanup={onRunBacklogCleanup}
+						onClearTrash={onClearTrash}
+						editingTaskId={editingTaskId}
+						inlineTaskEditor={inlineTaskEditor}
+						onEditTask={onEditTask}
+						onCommitTask={onCommitTask}
+						onOpenPrTask={onOpenPrTask}
+						onMoveToTrashTask={onMoveReviewCardToTrash}
+						onRestoreFromTrashTask={onRestoreTaskFromTrash}
+						commitTaskLoadingById={commitTaskLoadingById}
+						openPrTaskLoadingById={openPrTaskLoadingById}
+						moveToTrashLoadingById={moveToTrashLoadingById}
+					/>
+				))
 			) : null}
 			<div
 				style={{
