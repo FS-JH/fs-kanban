@@ -9,6 +9,7 @@ import { notifyError, showAppToast } from "@/components/app-toaster";
 import { CardDetailView } from "@/components/card-detail-view";
 import { ClearTrashDialog } from "@/components/clear-trash-dialog";
 import { DebugDialog } from "@/components/debug-dialog";
+import { AggregateColumnContextPanel } from "@/components/detail-panels/aggregate-column-context-panel";
 import { AgentTerminalPanel } from "@/components/detail-panels/agent-terminal-panel";
 import { GitHistoryView } from "@/components/git-history-view";
 import { KanbanBoard } from "@/components/kanban-board";
@@ -83,10 +84,13 @@ const BACKLOG_CLEANUP_PROMPT = `Review the current backlog for this workspace an
 - Only stop to ask me about items that are genuinely ambiguous or risky.
 - Finish with a concise summary of what you changed and what still needs a human decision.`;
 
+type DetailOrigin = "project" | "all-projects";
+
 export default function App(): ReactElement {
 	const [board, setBoard] = useState<BoardData>(() => createInitialBoardData());
 	const [sessions, setSessions] = useState<Record<string, RuntimeTaskSessionSummary>>({});
 	const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+	const [detailOrigin, setDetailOrigin] = useState<DetailOrigin>("project");
 	const [canPersistWorkspaceState, setCanPersistWorkspaceState] = useState(false);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [settingsInitialSection, setSettingsInitialSection] = useState<RuntimeSettingsSection | null>(null);
@@ -139,7 +143,7 @@ export default function App(): ReactElement {
 		streamError: aggregateStreamError,
 		isRuntimeDisconnected: isAggregateRuntimeDisconnected,
 		hasReceivedSnapshot: hasReceivedAggregateSnapshot,
-	} = useAggregateBoard(isAggregateView);
+	} = useAggregateBoard(isAggregateView || detailOrigin === "all-projects");
 	const activeNotificationWorkspaceId = navigationCurrentProjectId;
 	const isDocumentVisible = useDocumentVisibility();
 	const isInitialRuntimeLoad =
@@ -597,9 +601,14 @@ export default function App(): ReactElement {
 	const handleBack = useCallback(() => {
 		setSelectedTaskId(null);
 		setIsGitHistoryOpen(false);
-	}, []);
+		if (detailOrigin === "all-projects") {
+			setDetailOrigin("project");
+			handleSelectAllProjects();
+		}
+	}, [detailOrigin, handleSelectAllProjects]);
 	const handleAggregateCardSelect = useCallback(
 		(card: RuntimeAggregateBoardCard) => {
+			setDetailOrigin("all-projects");
 			setPendingAggregateCardSelection({
 				workspaceId: card.workspaceId,
 				taskId: card.card.id,
@@ -608,6 +617,25 @@ export default function App(): ReactElement {
 		},
 		[handleSelectProject],
 	);
+	const selectedAggregateCardKey =
+		detailOrigin === "all-projects" && currentProjectId && selectedTaskId
+			? `${currentProjectId}:${selectedTaskId}`
+			: null;
+	const aggregateDetailSidebarPanel =
+		detailOrigin === "all-projects" ? (
+			<AggregateColumnContextPanel
+				data={aggregateBoard}
+				selectedCardKey={selectedAggregateCardKey}
+				onCardSelect={handleAggregateCardSelect}
+				onCommitTask={handleAggregateCommitTask}
+				onOpenPrTask={handleAggregateOpenPrTask}
+				onMoveToTrashTask={handleAggregateMoveToTrashTask}
+				onCancelAutomaticTaskAction={handleAggregateCancelAutomaticTaskAction}
+				commitTaskLoadingById={aggregateCommitTaskLoadingById}
+				openPrTaskLoadingById={aggregateOpenPrTaskLoadingById}
+				moveToTrashLoadingById={aggregateMoveToTrashLoadingById}
+			/>
+		) : undefined;
 
 	const handleOpenSettings = useCallback((section?: RuntimeSettingsSection) => {
 		setSettingsInitialSection(section ?? null);
@@ -898,8 +926,12 @@ export default function App(): ReactElement {
 					onActiveSectionChange={setHomeSidebarSection}
 					canShowAgentSection={!isAggregateView && !hasNoProjects && Boolean(currentProjectId)}
 					agentSectionContent={homeSidebarAgentPanel}
-					onSelectAllProjects={handleSelectAllProjects}
+					onSelectAllProjects={() => {
+						setDetailOrigin("project");
+						handleSelectAllProjects();
+					}}
 					onSelectProject={(projectId) => {
+						setDetailOrigin("project");
 						void handleSelectProject(projectId);
 					}}
 					onRemoveProject={handleRemoveProject}
@@ -1153,6 +1185,7 @@ export default function App(): ReactElement {
 								}}
 								onMoveToTrash={handleMoveToTrash}
 								isMoveToTrashLoading={moveToTrashLoadingById[selectedCard.card.id] ?? false}
+								sidebarPanel={aggregateDetailSidebarPanel}
 								gitHistoryPanel={
 									isGitHistoryOpen ? (
 										<GitHistoryView workspaceId={currentProjectId} gitHistory={gitHistory} />
