@@ -7,11 +7,7 @@ import { AgentTerminalPanel } from "@/components/detail-panels/agent-terminal-pa
 import { Spinner } from "@/components/ui/spinner";
 import { selectNewestTaskSessionSummary } from "@/hooks/home-sidebar-agent-panel-session-summary";
 import { useHomeAgentSession } from "@/hooks/use-home-agent-session";
-import type {
-	RuntimeConfigResponse,
-	RuntimeGitRepositoryInfo,
-	RuntimeTaskSessionSummary,
-} from "@/runtime/types";
+import type { RuntimeConfigResponse, RuntimeGitRepositoryInfo, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { TERMINAL_THEME_COLORS } from "@/terminal/theme-colors";
 
 interface UseHomeSidebarAgentPanelInput {
@@ -22,13 +18,19 @@ interface UseHomeSidebarAgentPanelInput {
 	workspaceGit: RuntimeGitRepositoryInfo | null;
 }
 
+interface UseHomeSidebarAgentPanelResult {
+	panel: ReactElement | null;
+	summary: RuntimeTaskSessionSummary | null;
+	taskId: string | null;
+}
+
 export function useHomeSidebarAgentPanel({
 	currentProjectId,
 	hasNoProjects,
 	runtimeProjectConfig,
 	taskSessions,
 	workspaceGit,
-}: UseHomeSidebarAgentPanelInput): ReactElement | null {
+}: UseHomeSidebarAgentPanelInput): UseHomeSidebarAgentPanelResult {
 	const [sessionSummaries, setSessionSummaries] = useState<Record<string, RuntimeTaskSessionSummary>>({});
 	const upsertSessionSummary = useCallback((summary: RuntimeTaskSessionSummary) => {
 		setSessionSummaries((currentSessions) => {
@@ -77,38 +79,54 @@ export function useHomeSidebarAgentPanel({
 	const homeAgentPanelSummary = taskId ? (effectiveSessionSummaries[taskId] ?? null) : null;
 
 	if (hasNoProjects || !currentProjectId) {
-		return null;
+		return {
+			panel: null,
+			summary: null,
+			taskId: null,
+		};
 	}
 
 	if (!runtimeProjectConfig) {
-		return (
-			<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 py-6">
-				<Spinner size={20} />
-			</div>
-		);
+		return {
+			panel: (
+				<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 py-6">
+					<Spinner size={20} />
+				</div>
+			),
+			summary: null,
+			taskId: null,
+		};
 	}
 
 	if (taskId) {
-		return (
-			<AgentTerminalPanel
-				key={taskId}
-				taskId={taskId}
-				workspaceId={currentProjectId}
-				summary={homeAgentPanelSummary}
-				onSummary={upsertSessionSummary}
-				showSessionToolbar={false}
-				autoFocus
-				panelBackgroundColor={TERMINAL_THEME_COLORS.surfaceRaised}
-				terminalBackgroundColor={TERMINAL_THEME_COLORS.surfaceRaised}
-				cursorColor={TERMINAL_THEME_COLORS.textPrimary}
-				showRightBorder={false}
-			/>
-		);
+		return {
+			panel: (
+				<AgentTerminalPanel
+					key={taskId}
+					taskId={taskId}
+					workspaceId={currentProjectId}
+					summary={homeAgentPanelSummary}
+					onSummary={upsertSessionSummary}
+					showSessionToolbar={false}
+					autoFocus
+					panelBackgroundColor={TERMINAL_THEME_COLORS.surfaceRaised}
+					terminalBackgroundColor={TERMINAL_THEME_COLORS.surfaceRaised}
+					cursorColor={TERMINAL_THEME_COLORS.textPrimary}
+					showRightBorder={false}
+				/>
+			),
+			summary: homeAgentPanelSummary,
+			taskId,
+		};
 	}
 
-	return (
-		<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 text-center text-sm text-text-secondary">
-			No runnable {selectedAgentLabel} command is configured. Open Settings, install the CLI, and select it.
-		</div>
-	);
+	return {
+		panel: (
+			<div className="flex w-full items-center justify-center rounded-md border border-border bg-surface-2 px-3 text-center text-sm text-text-secondary">
+				No runnable {selectedAgentLabel} command is configured. Open Settings, install the CLI, and select it.
+			</div>
+		),
+		summary: null,
+		taskId: null,
+	};
 }

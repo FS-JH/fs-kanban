@@ -57,6 +57,23 @@ function commitAll(cwd: string, message: string): string {
 	return runGit(cwd, ["rev-parse", "HEAD"]);
 }
 
+function createIsolatedRuntimeTestEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+	const env = createGitTestEnv();
+	for (const key of Object.keys(env)) {
+		if (key.startsWith("KANBAN_")) {
+			delete env[key];
+		}
+	}
+	delete env.HTTPS_PORT;
+	delete env.TLS_CERT;
+	delete env.TLS_KEY;
+	return {
+		...env,
+		KANBAN_RUNTIME_HOST: "127.0.0.1",
+		...overrides,
+	};
+}
+
 async function getAvailablePort(): Promise<number> {
 	const server = createServer();
 	await new Promise<void>((resolveListen, rejectListen) => {
@@ -166,7 +183,9 @@ async function waitForBrowserOpenCount(logPath: string, expectedCount: number, t
 			setTimeout(resolve, 25);
 		});
 	}
-	throw new Error(`Timed out waiting for browser open count ${expectedCount}. Current log: ${readBrowserOpenLog(logPath).join(", ")}`);
+	throw new Error(
+		`Timed out waiting for browser open count ${expectedCount}. Current log: ${readBrowserOpenLog(logPath).join(", ")}`,
+	);
 }
 
 async function waitForExit(process: ChildProcess, timeoutMs: number): Promise<boolean> {
@@ -256,7 +275,7 @@ describe("source task commands", () => {
 			commitAll(projectPath, "init");
 
 			const port = String(await getAvailablePort());
-			const env = createGitTestEnv({
+			const env = createIsolatedRuntimeTestEnv({
 				HOME: homeDir,
 				USERPROFILE: homeDir,
 				KANBAN_RUNTIME_PORT: port,
@@ -345,7 +364,7 @@ describe("source task commands", () => {
 			const browserStubBinDir = join(homeDir, "browser-bin");
 			const browserOpenLogPath = join(homeDir, "browser-open.log");
 			installBrowserOpenStub(browserStubBinDir, browserOpenLogPath);
-			const env = createGitTestEnv({
+			const env = createIsolatedRuntimeTestEnv({
 				HOME: homeDir,
 				USERPROFILE: homeDir,
 				KANBAN_RUNTIME_PORT: port,
@@ -420,7 +439,7 @@ describe("source task commands", () => {
 			commitAll(projectPath, "init");
 
 			const port = String(await getAvailablePort());
-			const env = createGitTestEnv({
+			const env = createIsolatedRuntimeTestEnv({
 				HOME: homeDir,
 				USERPROFILE: homeDir,
 				KANBAN_RUNTIME_PORT: port,

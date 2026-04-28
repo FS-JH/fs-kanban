@@ -8,12 +8,12 @@ import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
+import { getRuntimeTaskSessionStatus } from "@/runtime/task-session-status";
 import type { RuntimeAgentId, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import { usePersistentTerminalSession } from "@/terminal/use-persistent-terminal-session";
 import { isMacPlatform } from "@/utils/platform";
 import type { TaskRetryAgentOption } from "@/utils/task-agent-preferences";
-
 
 interface AgentTerminalSessionControls {
 	clearTerminal: () => void;
@@ -59,37 +59,23 @@ export interface AgentTerminalPanelProps {
 }
 
 function describeState(summary: RuntimeTaskSessionSummary | null): string {
-	if (!summary) {
-		return "No session yet";
-	}
-	if (summary.state === "running") {
-		return "Running";
-	}
-	if (summary.state === "awaiting_review") {
-		return "Ready for review";
-	}
-	if (summary.state === "interrupted") {
-		return "Interrupted";
-	}
-	if (summary.state === "failed") {
-		return "Failed";
-	}
-	return "Idle";
+	return getRuntimeTaskSessionStatus(summary).label;
 }
 
-type StatusTagStyle = "neutral" | "success" | "warning" | "danger";
+type StatusTagStyle = "neutral" | "info" | "success" | "warning" | "danger";
 
 function getStateTagStyle(summary: RuntimeTaskSessionSummary | null): StatusTagStyle {
-	if (!summary) {
-		return "neutral";
+	const status = getRuntimeTaskSessionStatus(summary);
+	if (status.tone === "info") {
+		return "info";
 	}
-	if (summary.state === "running") {
+	if (status.tone === "success") {
 		return "success";
 	}
-	if (summary.state === "awaiting_review") {
+	if (status.tone === "warning") {
 		return "warning";
 	}
-	if (summary.state === "interrupted" || summary.state === "failed") {
+	if (status.tone === "danger") {
 		return "danger";
 	}
 	return "neutral";
@@ -97,6 +83,7 @@ function getStateTagStyle(summary: RuntimeTaskSessionSummary | null): StatusTagS
 
 const statusTagColors: Record<StatusTagStyle, string> = {
 	neutral: "bg-surface-3 text-text-secondary",
+	info: "bg-status-blue/15 text-status-blue",
 	success: "bg-status-green/15 text-status-green",
 	warning: "bg-status-orange/15 text-status-orange",
 	danger: "bg-status-red/15 text-status-red",
@@ -245,6 +232,19 @@ function AgentTerminalPanelLayout({
 	const canStop = summary?.state === "running" || summary?.state === "awaiting_review";
 	const statusLabel = useMemo(() => describeState(summary), [summary]);
 	const statusTagStyle = useMemo(() => getStateTagStyle(summary), [summary]);
+	const sessionStatus = useMemo(() => getRuntimeTaskSessionStatus(summary), [summary]);
+	const attentionBannerText = useMemo(() => {
+		if (sessionStatus.kind === "needs_approval") {
+			return "The agent is blocked until you approve the next step.";
+		}
+		if (sessionStatus.kind === "needs_input") {
+			return "The agent is blocked until you answer it.";
+		}
+		if (sessionStatus.kind === "needs_review") {
+			return "The agent stopped on an error and needs you to review it.";
+		}
+		return null;
+	}, [sessionStatus.kind]);
 	const agentLabel = useMemo(() => {
 		const normalizedCommand = agentCommand?.trim();
 		if (!normalizedCommand) {
@@ -299,6 +299,11 @@ function AgentTerminalPanelLayout({
 							</Button>
 						</div>
 					</div>
+					{attentionBannerText ? (
+						<div className="border-y border-status-orange/30 bg-status-orange/10 px-3 py-2 text-xs text-status-orange">
+							{attentionBannerText}
+						</div>
+					) : null}
 					<div className="h-px bg-border" />
 				</>
 			) : onClose ? (
@@ -314,6 +319,11 @@ function AgentTerminalPanelLayout({
 					<div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
 						<span className="text-text-secondary" style={{ fontSize: 12 }}>
 							{minimalHeaderTitle}
+						</span>
+						<span
+							className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${statusTagColors[statusTagStyle]}`}
+						>
+							{statusLabel}
 						</span>
 						{minimalHeaderSubtitle ? (
 							<span
@@ -380,9 +390,7 @@ function AgentTerminalPanelLayout({
 				/>
 			</div>
 			{lastError ? (
-				<div
-					className="flex gap-2 rounded-none border-t border-status-red/30 bg-status-red/10 p-3 text-[13px] text-status-red"
-				>
+				<div className="flex gap-2 rounded-none border-t border-status-red/30 bg-status-red/10 p-3 text-[13px] text-status-red">
 					{lastError}
 				</div>
 			) : null}
@@ -411,11 +419,7 @@ function AgentTerminalPanelLayout({
 						isOpenPrLoading={isOpenPrLoading}
 					/>
 					{cancelAutomaticActionLabel && onCancelAutomaticAction ? (
-						<Button
-							variant="default"
-							fill
-							onClick={onCancelAutomaticAction}
-						>
+						<Button variant="default" fill onClick={onCancelAutomaticAction}>
 							{cancelAutomaticActionLabel}
 						</Button>
 					) : null}

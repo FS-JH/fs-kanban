@@ -19,19 +19,15 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { TASK_GIT_BASE_REF_PROMPT_VARIABLE, type TaskGitAction } from "@/git-actions/build-task-git-action-prompt";
-import type {
-	RuntimeAgentId,
-	RuntimeConfigResponse,
-	RuntimeProjectShortcut,
-} from "@/runtime/types";
-import { useRuntimeConfig } from "@/runtime/use-runtime-config";
 import { openFileOnHost } from "@/runtime/runtime-config-query";
-import { formatPathForDisplay } from "@/utils/path-display";
+import type { RuntimeAgentId, RuntimeConfigResponse, RuntimeProjectShortcut } from "@/runtime/types";
+import { useRuntimeConfig } from "@/runtime/use-runtime-config";
 import {
 	type BrowserNotificationPermission,
 	getBrowserNotificationPermission,
 	requestBrowserNotificationPermission,
 } from "@/utils/notification-permission";
+import { formatPathForDisplay } from "@/utils/path-display";
 import { useUnmount, useWindowEvent } from "@/utils/react-use";
 
 interface RuntimeSettingsAgentRowModel {
@@ -52,6 +48,27 @@ function quoteCommandPartForDisplay(part: string): string {
 function buildDisplayedAgentCommand(agentId: RuntimeAgentId, binary: string, autonomousModeEnabled: boolean): string {
 	const args = autonomousModeEnabled ? (getRuntimeAgentCatalogEntry(agentId)?.autonomousArgs ?? []) : [];
 	return [binary, ...args.map(quoteCommandPartForDisplay)].join(" ");
+}
+
+function renderSwitch({
+	checked,
+	disabled,
+	onCheckedChange,
+}: {
+	checked: boolean;
+	disabled: boolean;
+	onCheckedChange: (checked: boolean) => void;
+}): React.ReactElement {
+	return (
+		<RadixSwitch.Root
+			checked={checked}
+			disabled={disabled}
+			onCheckedChange={onCheckedChange}
+			className="relative h-5 w-9 rounded-full bg-surface-4 data-[state=checked]:bg-accent cursor-pointer disabled:opacity-40"
+		>
+			<RadixSwitch.Thumb className="block h-4 w-4 rounded-full bg-white shadow-sm transition-transform translate-x-0.5 data-[state=checked]:translate-x-[18px]" />
+		</RadixSwitch.Root>
+	);
 }
 
 function normalizeTemplateForComparison(value: string): string {
@@ -289,6 +306,8 @@ export function RuntimeSettingsDialog({
 	const [selectedAgentId, setSelectedAgentId] = useState<RuntimeAgentId>("claude");
 	const [fallbackAgentId, setFallbackAgentId] = useState<RuntimeAgentId | null>(null);
 	const [agentAutonomousModeEnabled, setAgentAutonomousModeEnabled] = useState(true);
+	const [agentAttentionNotificationsEnabled, setAgentAttentionNotificationsEnabled] = useState(true);
+	const [agentAttentionSoundEnabled, setAgentAttentionSoundEnabled] = useState(false);
 	const [readyForReviewNotificationsEnabled, setReadyForReviewNotificationsEnabled] = useState(true);
 	const [notificationPermission, setNotificationPermission] = useState<BrowserNotificationPermission>("unsupported");
 	const [shortcuts, setShortcuts] = useState<RuntimeProjectShortcut[]>([]);
@@ -355,6 +374,8 @@ export function RuntimeSettingsDialog({
 	const initialSelectedAgentId = configuredAgentId ?? fallbackSelectedAgentId;
 	const initialFallbackAgentId = configuredFallbackAgentId;
 	const initialAgentAutonomousModeEnabled = config?.agentAutonomousModeEnabled ?? true;
+	const initialAgentAttentionNotificationsEnabled = config?.agentAttentionNotificationsEnabled ?? true;
+	const initialAgentAttentionSoundEnabled = config?.agentAttentionSoundEnabled ?? false;
 	const initialReadyForReviewNotificationsEnabled = config?.readyForReviewNotificationsEnabled ?? true;
 	const initialShortcuts = config?.shortcuts ?? [];
 	const initialCommitPromptTemplate = config?.commitPromptTemplate ?? "";
@@ -370,6 +391,12 @@ export function RuntimeSettingsDialog({
 			return true;
 		}
 		if (agentAutonomousModeEnabled !== initialAgentAutonomousModeEnabled) {
+			return true;
+		}
+		if (agentAttentionNotificationsEnabled !== initialAgentAttentionNotificationsEnabled) {
+			return true;
+		}
+		if (agentAttentionSoundEnabled !== initialAgentAttentionSoundEnabled) {
 			return true;
 		}
 		if (readyForReviewNotificationsEnabled !== initialReadyForReviewNotificationsEnabled) {
@@ -392,6 +419,8 @@ export function RuntimeSettingsDialog({
 		agentAutonomousModeEnabled,
 		commitPromptTemplate,
 		config,
+		initialAgentAttentionNotificationsEnabled,
+		initialAgentAttentionSoundEnabled,
 		initialAgentAutonomousModeEnabled,
 		initialFallbackAgentId,
 		initialCommitPromptTemplate,
@@ -400,6 +429,8 @@ export function RuntimeSettingsDialog({
 		initialSelectedAgentId,
 		initialShortcuts,
 		openPrPromptTemplate,
+		agentAttentionNotificationsEnabled,
+		agentAttentionSoundEnabled,
 		readyForReviewNotificationsEnabled,
 		fallbackAgentId,
 		selectedAgentId,
@@ -413,12 +444,16 @@ export function RuntimeSettingsDialog({
 		setSelectedAgentId(configuredAgentId ?? fallbackSelectedAgentId);
 		setFallbackAgentId(config?.fallbackAgentId ?? null);
 		setAgentAutonomousModeEnabled(config?.agentAutonomousModeEnabled ?? true);
+		setAgentAttentionNotificationsEnabled(config?.agentAttentionNotificationsEnabled ?? true);
+		setAgentAttentionSoundEnabled(config?.agentAttentionSoundEnabled ?? false);
 		setReadyForReviewNotificationsEnabled(config?.readyForReviewNotificationsEnabled ?? true);
 		setShortcuts(config?.shortcuts ?? []);
 		setCommitPromptTemplate(config?.commitPromptTemplate ?? "");
 		setOpenPrPromptTemplate(config?.openPrPromptTemplate ?? "");
 		setSaveError(null);
 	}, [
+		config?.agentAttentionNotificationsEnabled,
+		config?.agentAttentionSoundEnabled,
 		config?.agentAutonomousModeEnabled,
 		config?.fallbackAgentId,
 		config?.commitPromptTemplate,
@@ -525,8 +560,8 @@ export function RuntimeSettingsDialog({
 			}
 		}
 		const shouldRequestNotificationPermission =
-			!initialReadyForReviewNotificationsEnabled &&
-			readyForReviewNotificationsEnabled &&
+			!(initialAgentAttentionNotificationsEnabled || initialReadyForReviewNotificationsEnabled) &&
+			(agentAttentionNotificationsEnabled || readyForReviewNotificationsEnabled) &&
 			notificationPermission === "default";
 		if (shouldRequestNotificationPermission) {
 			const nextPermission = await requestBrowserNotificationPermission();
@@ -536,6 +571,8 @@ export function RuntimeSettingsDialog({
 			selectedAgentId,
 			fallbackAgentId: normalizedFallbackAgentId,
 			agentAutonomousModeEnabled,
+			agentAttentionNotificationsEnabled,
+			agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled,
 			shortcuts,
 			commitPromptTemplate,
@@ -581,7 +618,9 @@ export function RuntimeSettingsDialog({
 						}
 					}}
 				>
-					{config?.globalConfigPath ? formatPathForDisplay(config.globalConfigPath) : "~/.config/fs-kanban/config.json"}
+					{config?.globalConfigPath
+						? formatPathForDisplay(config.globalConfigPath)
+						: "~/.config/fs-kanban/config.json"}
 					{config?.globalConfigPath ? <ExternalLink size={12} className="inline ml-1.5 align-middle" /> : null}
 				</p>
 
@@ -642,10 +681,15 @@ export function RuntimeSettingsDialog({
 							<Check size={12} className="text-white" />
 						</RadixCheckbox.Indicator>
 					</RadixCheckbox.Root>
-					<span>Enable bypass permissions flag</span>
+					<span>Full auto permissions bypass</span>
 				</label>
 				<p className="text-text-secondary text-[13px] ml-6 mt-0 mb-0">
-					Allows agents to use tools without stopping for permission. Use at your own risk.
+					Bypasses the agent’s permission prompts entirely. This is the current unsafe full-auto mode, not a
+					supervised approver.
+				</p>
+				<p className="text-text-secondary text-[12px] ml-6 mt-1 mb-0">
+					Supervised auto-approval, where another agent approves only safe next steps, still needs dedicated
+					runtime work.
 				</p>
 
 				<div className="flex items-center justify-between mt-4 mb-1">
@@ -704,14 +748,27 @@ export function RuntimeSettingsDialog({
 				</p>
 				<h6 className="font-semibold text-text-primary mt-4 mb-2">Notifications</h6>
 				<div className="flex items-center gap-2">
-					<RadixSwitch.Root
-						checked={readyForReviewNotificationsEnabled}
-						disabled={controlsDisabled}
-						onCheckedChange={setReadyForReviewNotificationsEnabled}
-						className="relative h-5 w-9 rounded-full bg-surface-4 data-[state=checked]:bg-accent cursor-pointer disabled:opacity-40"
-					>
-						<RadixSwitch.Thumb className="block h-4 w-4 rounded-full bg-white shadow-sm transition-transform translate-x-0.5 data-[state=checked]:translate-x-[18px]" />
-					</RadixSwitch.Root>
+					{renderSwitch({
+						checked: agentAttentionNotificationsEnabled,
+						disabled: controlsDisabled,
+						onCheckedChange: setAgentAttentionNotificationsEnabled,
+					})}
+					<span className="text-[13px] text-text-primary">Notify when an agent needs you</span>
+				</div>
+				<div className="flex items-center gap-2 mt-2">
+					{renderSwitch({
+						checked: agentAttentionSoundEnabled,
+						disabled: controlsDisabled,
+						onCheckedChange: setAgentAttentionSoundEnabled,
+					})}
+					<span className="text-[13px] text-text-primary">Play a sound when an agent needs you</span>
+				</div>
+				<div className="flex items-center gap-2 mt-2">
+					{renderSwitch({
+						checked: readyForReviewNotificationsEnabled,
+						disabled: controlsDisabled,
+						onCheckedChange: setReadyForReviewNotificationsEnabled,
+					})}
 					<span className="text-[13px] text-text-primary">Notify when a task is ready for review</span>
 				</div>
 				<div className="flex items-center gap-2 mt-2 mb-2">
@@ -737,7 +794,9 @@ export function RuntimeSettingsDialog({
 						}
 					}}
 				>
-					{config?.projectConfigPath ? formatPathForDisplay(config.projectConfigPath) : "<project>/.fs-kanban/config.json"}
+					{config?.projectConfigPath
+						? formatPathForDisplay(config.projectConfigPath)
+						: "<project>/.fs-kanban/config.json"}
 					{config?.projectConfigPath ? <ExternalLink size={12} className="inline ml-1.5 align-middle" /> : null}
 				</p>
 

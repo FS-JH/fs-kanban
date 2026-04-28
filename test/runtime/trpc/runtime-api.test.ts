@@ -59,6 +59,8 @@ function createRuntimeConfigState(): RuntimeConfigState {
 		fallbackAgentId: null,
 		selectedShortcutLabel: null,
 		agentAutonomousModeEnabled: true,
+		agentAttentionNotificationsEnabled: true,
+		agentAttentionSoundEnabled: false,
 		readyForReviewNotificationsEnabled: true,
 		shortcuts: [],
 		commitPromptTemplate: "commit",
@@ -141,7 +143,9 @@ describe("createRuntimeApi runtime behavior", () => {
 	});
 
 	it("ensures the worktree when no existing task cwd is available", async () => {
-		taskWorktreeMocks.resolveTaskCwd.mockRejectedValueOnce(new Error("missing")).mockResolvedValueOnce("/tmp/new-worktree");
+		taskWorktreeMocks.resolveTaskCwd
+			.mockRejectedValueOnce(new Error("missing"))
+			.mockResolvedValueOnce("/tmp/new-worktree");
 
 		const terminalManager = createTerminalManagerMock();
 		const api = createRuntimeApi({

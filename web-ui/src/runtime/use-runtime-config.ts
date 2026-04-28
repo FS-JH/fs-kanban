@@ -14,6 +14,8 @@ export interface UseRuntimeConfigResult {
 		fallbackAgentId?: RuntimeAgentId | null;
 		selectedShortcutLabel?: string | null;
 		agentAutonomousModeEnabled?: boolean;
+		agentAttentionNotificationsEnabled?: boolean;
+		agentAttentionSoundEnabled?: boolean;
 		shortcuts?: RuntimeProjectShortcut[];
 		readyForReviewNotificationsEnabled?: boolean;
 		commitPromptTemplate?: string;
@@ -82,6 +84,8 @@ export function useRuntimeConfig(
 			fallbackAgentId?: RuntimeAgentId | null;
 			selectedShortcutLabel?: string | null;
 			agentAutonomousModeEnabled?: boolean;
+			agentAttentionNotificationsEnabled?: boolean;
+			agentAttentionSoundEnabled?: boolean;
 			shortcuts?: RuntimeProjectShortcut[];
 			readyForReviewNotificationsEnabled?: boolean;
 			commitPromptTemplate?: string;

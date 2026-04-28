@@ -269,9 +269,9 @@ describe("BoardCard", () => {
 					card={createCard()}
 					index={0}
 					columnId="in_progress"
-						sessionSummary={{
-							taskId: "task-1",
-							state: "running",
+					sessionSummary={{
+						taskId: "task-1",
+						state: "running",
 						agentId: "codex",
 						workspacePath: "/tmp/worktree",
 						pid: null,
@@ -301,7 +301,7 @@ describe("BoardCard", () => {
 		expect(container.textContent).not.toContain("Using Read");
 	});
 
-it("shows local-agent tool activity in the compact tool label format", async () => {
+	it("shows local-agent tool activity in the compact tool label format", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
@@ -355,7 +355,7 @@ it("shows local-agent tool activity in the compact tool label format", async () 
 		expect(container.textContent).not.toContain("Calling Read");
 	});
 
-it("keeps showing the last tool label during assistant streaming", async () => {
+	it("keeps showing the last tool label during assistant streaming", async () => {
 		await act(async () => {
 			root.render(
 				<BoardCard
@@ -374,14 +374,14 @@ it("keeps showing the last tool label during assistant streaming", async () => {
 						reviewReason: null,
 						exitCode: null,
 						lastHookAt: Date.now(),
-							latestHookActivity: {
-								activityText: "Agent active",
-								toolName: "Read",
-								toolInputSummary: "src/index.ts",
-								finalMessage: "Looking at the file now",
-								hookEventName: "assistant_delta",
-								notificationType: null,
-								source: "codex",
+						latestHookActivity: {
+							activityText: "Agent active",
+							toolName: "Read",
+							toolInputSummary: "src/index.ts",
+							finalMessage: "Looking at the file now",
+							hookEventName: "assistant_delta",
+							notificationType: null,
+							source: "codex",
 						},
 						latestTurnCheckpoint: null,
 						previousTurnCheckpoint: null,
@@ -527,14 +527,14 @@ it("keeps showing the last tool label during assistant streaming", async () => {
 					card={createCard()}
 					index={0}
 					columnId="in_progress"
-						sessionSummary={createSummary("running", {
-							latestHookActivity: {
-								activityText: "Reviewing the final diff",
-								toolName: null,
-								toolInputSummary: null,
-								finalMessage: "Reviewing the final diff",
-								hookEventName: "assistant_delta",
-								notificationType: null,
+					sessionSummary={createSummary("running", {
+						latestHookActivity: {
+							activityText: "Reviewing the final diff",
+							toolName: null,
+							toolInputSummary: null,
+							finalMessage: "Reviewing the final diff",
+							hookEventName: "assistant_delta",
+							notificationType: null,
 							source: "codex",
 						},
 					})}
@@ -571,5 +571,60 @@ it("keeps showing the last tool label during assistant streaming", async () => {
 
 		expect(container.textContent).toContain("checking the next file");
 		expect(container.textContent).not.toContain("Agent:");
+	});
+
+	it("shows an obvious needs approval state instead of generic thinking", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="review"
+					sessionSummary={createSummary("awaiting_review", {
+						reviewReason: "hook",
+						latestHookActivity: {
+							activityText: "Waiting for approval",
+							toolName: null,
+							toolInputSummary: null,
+							finalMessage: null,
+							hookEventName: "PermissionRequest",
+							notificationType: "permission_prompt",
+							source: "claude",
+						},
+					})}
+				/>,
+			);
+		});
+
+		expect(container.textContent).toContain("Needs approval");
+		expect(container.textContent).toContain("Needs approval to continue");
+		expect(container.textContent).not.toContain("Thinking...");
+	});
+
+	it("shows an obvious needs input state when the agent is blocked on a question", async () => {
+		await act(async () => {
+			root.render(
+				<BoardCard
+					card={createCard()}
+					index={0}
+					columnId="review"
+					sessionSummary={createSummary("awaiting_review", {
+						reviewReason: "attention",
+						latestHookActivity: {
+							activityText: null,
+							toolName: null,
+							toolInputSummary: null,
+							finalMessage: "Which branch should I target?",
+							hookEventName: "Notification",
+							notificationType: "user_attention",
+							source: "codex",
+						},
+					})}
+				/>,
+			);
+		});
+
+		expect(container.textContent).toContain("Needs input");
+		expect(container.textContent).toContain("Needs input: Which branch should I target?");
 	});
 });

@@ -116,12 +116,16 @@ describe.sequential("runtime-config auto agent selection", () => {
 					const persisted = JSON.parse(readFileSync(getGlobalRuntimeConfigPath(tempHome), "utf8")) as {
 						selectedAgentId?: string;
 						agentAutonomousModeEnabled?: boolean;
+						agentAttentionNotificationsEnabled?: boolean;
+						agentAttentionSoundEnabled?: boolean;
 						readyForReviewNotificationsEnabled?: boolean;
 						commitPromptTemplate?: string;
 						openPrPromptTemplate?: string;
 					};
 					expect(persisted.selectedAgentId).toBeUndefined();
 					expect(persisted.agentAutonomousModeEnabled).toBeUndefined();
+					expect(persisted.agentAttentionNotificationsEnabled).toBeUndefined();
+					expect(persisted.agentAttentionSoundEnabled).toBeUndefined();
 					expect(persisted.readyForReviewNotificationsEnabled).toBeUndefined();
 					expect(persisted.commitPromptTemplate).toBeUndefined();
 					expect(persisted.openPrPromptTemplate).toBeUndefined();
@@ -179,7 +183,9 @@ describe.sequential("runtime-config auto agent selection", () => {
 			return;
 		}
 		const { path: tempHome, cleanup: cleanupHome } = createTempDir("kanban-home-runtime-config-claude-desktop-");
-		const { path: tempProject, cleanup: cleanupProject } = createTempDir("kanban-project-runtime-config-claude-desktop-");
+		const { path: tempProject, cleanup: cleanupProject } = createTempDir(
+			"kanban-project-runtime-config-claude-desktop-",
+		);
 		const { path: tempBin, cleanup: cleanupBin } = createTempDir("kanban-bin-runtime-config-claude-desktop-");
 
 		try {
@@ -327,6 +333,8 @@ describe.sequential("runtime-config auto agent selection", () => {
 					fallbackAgentId: null,
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
+					agentAttentionNotificationsEnabled: true,
+					agentAttentionSoundEnabled: false,
 					readyForReviewNotificationsEnabled: true,
 					shortcuts: [],
 					commitPromptTemplate: current.commitPromptTemplateDefault,
@@ -336,12 +344,16 @@ describe.sequential("runtime-config auto agent selection", () => {
 				const globalPayload = JSON.parse(readFileSync(getGlobalRuntimeConfigPath(tempHome), "utf8")) as {
 					selectedAgentId?: string;
 					agentAutonomousModeEnabled?: boolean;
+					agentAttentionNotificationsEnabled?: boolean;
+					agentAttentionSoundEnabled?: boolean;
 					readyForReviewNotificationsEnabled?: boolean;
 					commitPromptTemplate?: string;
 					openPrPromptTemplate?: string;
 				};
 				expect(globalPayload.selectedAgentId).toBeUndefined();
 				expect(globalPayload.agentAutonomousModeEnabled).toBeUndefined();
+				expect(globalPayload.agentAttentionNotificationsEnabled).toBeUndefined();
+				expect(globalPayload.agentAttentionSoundEnabled).toBeUndefined();
 				expect(globalPayload.readyForReviewNotificationsEnabled).toBeUndefined();
 				expect(globalPayload.commitPromptTemplate).toBeUndefined();
 				expect(globalPayload.openPrPromptTemplate).toBeUndefined();
@@ -371,6 +383,8 @@ describe.sequential("runtime-config auto agent selection", () => {
 					fallbackAgentId: null,
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
+					agentAttentionNotificationsEnabled: true,
+					agentAttentionSoundEnabled: false,
 					readyForReviewNotificationsEnabled: true,
 					shortcuts: [],
 					commitPromptTemplate: current.commitPromptTemplateDefault,
@@ -399,6 +413,8 @@ describe.sequential("runtime-config auto agent selection", () => {
 					fallbackAgentId: null,
 					selectedShortcutLabel: null,
 					agentAutonomousModeEnabled: true,
+					agentAttentionNotificationsEnabled: true,
+					agentAttentionSoundEnabled: false,
 					readyForReviewNotificationsEnabled: true,
 					shortcuts: [{ label: "Ship", command: "npm run ship", icon: "rocket" }],
 					commitPromptTemplate: current.commitPromptTemplateDefault,
