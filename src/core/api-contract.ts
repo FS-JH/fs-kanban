@@ -395,9 +395,7 @@ export type RuntimeWorkspaceImportBacklogTasksResponse = z.infer<
 export const runtimeWorkspaceImportedTaskLookupRequestSchema = z.object({
 	externalSource: runtimeExternalTaskSourceInputSchema,
 });
-export type RuntimeWorkspaceImportedTaskLookupRequest = z.infer<
-	typeof runtimeWorkspaceImportedTaskLookupRequestSchema
->;
+export type RuntimeWorkspaceImportedTaskLookupRequest = z.infer<typeof runtimeWorkspaceImportedTaskLookupRequestSchema>;
 
 export const runtimeWorkspaceImportedTaskLookupResponseSchema = z.object({
 	found: z.boolean(),
@@ -721,6 +719,8 @@ export const runtimeConfigResponseSchema = z.object({
 	fallbackAgentId: runtimeAgentIdSchema.nullable(),
 	selectedShortcutLabel: z.string().nullable(),
 	agentAutonomousModeEnabled: z.boolean(),
+	agentAttentionNotificationsEnabled: z.boolean().optional(),
+	agentAttentionSoundEnabled: z.boolean().optional(),
 	debugModeEnabled: z.boolean().optional(),
 	effectiveCommand: z.string().nullable(),
 	globalConfigPath: z.string(),
@@ -741,6 +741,8 @@ export const runtimeConfigSaveRequestSchema = z.object({
 	fallbackAgentId: runtimeAgentIdSchema.nullable().optional(),
 	selectedShortcutLabel: z.string().nullable().optional(),
 	agentAutonomousModeEnabled: z.boolean().optional(),
+	agentAttentionNotificationsEnabled: z.boolean().optional(),
+	agentAttentionSoundEnabled: z.boolean().optional(),
 	shortcuts: z.array(runtimeProjectShortcutSchema).optional(),
 	readyForReviewNotificationsEnabled: z.boolean().optional(),
 	commitPromptTemplate: z.string().optional(),

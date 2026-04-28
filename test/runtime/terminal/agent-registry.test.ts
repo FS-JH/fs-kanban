@@ -25,6 +25,8 @@ function createRuntimeConfigState(overrides: Partial<RuntimeConfigState> = {}): 
 		fallbackAgentId: null,
 		selectedShortcutLabel: null,
 		agentAutonomousModeEnabled: true,
+		agentAttentionNotificationsEnabled: true,
+		agentAttentionSoundEnabled: false,
 		readyForReviewNotificationsEnabled: true,
 		shortcuts: [],
 		commitPromptTemplate: "commit",

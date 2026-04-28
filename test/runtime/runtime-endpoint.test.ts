@@ -1,11 +1,12 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
 	buildKanbanRuntimeBindUrl,
 	buildKanbanRuntimeUrl,
 	buildKanbanRuntimeWsUrl,
-	DEFAULT_KANBAN_RUNTIME_PORT,
+	DEFAULT_KANBAN_RUNTIME_HOST,
 	DEFAULT_KANBAN_RUNTIME_HTTPS_PORT,
+	DEFAULT_KANBAN_RUNTIME_PORT,
 	getKanbanRuntimeAdvertisedHost,
 	getKanbanRuntimeHost,
 	getKanbanRuntimeHttpsPort,
@@ -29,6 +30,18 @@ const originalEnvTlsCert = process.env.KANBAN_RUNTIME_TLS_CERT;
 const originalEnvTlsKey = process.env.KANBAN_RUNTIME_TLS_KEY;
 const originalEnvTlsCertFallback = process.env.TLS_CERT;
 const originalEnvTlsKeyFallback = process.env.TLS_KEY;
+
+beforeEach(() => {
+	delete process.env.KANBAN_RUNTIME_TLS_CERT;
+	delete process.env.KANBAN_RUNTIME_TLS_KEY;
+	delete process.env.TLS_CERT;
+	delete process.env.TLS_KEY;
+	delete process.env.KANBAN_RUNTIME_HTTPS_PORT;
+	delete process.env.HTTPS_PORT;
+	setKanbanRuntimeHost(DEFAULT_KANBAN_RUNTIME_HOST);
+	setKanbanRuntimeAdvertisedHost(null);
+	setKanbanRuntimePort(DEFAULT_KANBAN_RUNTIME_PORT);
+});
 
 afterEach(() => {
 	setKanbanRuntimePort(originalRuntimePort);

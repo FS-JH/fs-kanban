@@ -1,14 +1,15 @@
 import { Draggable } from "@hello-pangea/dnd";
 import { buildTaskWorktreeDisplayPath } from "@runtime-task-worktree-path";
+import { formatToolCallLabel } from "@runtime-tool-call-display";
 import { AlertCircle, GitBranch, Play, RotateCcw, Trash2 } from "lucide-react";
 import type { CSSProperties, HTMLAttributes, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { formatToolCallLabel } from "@runtime-tool-call-display";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip } from "@/components/ui/tooltip";
+import { getRuntimeTaskSessionStatus, type RuntimeTaskSessionStatusKind } from "@/runtime/task-session-status";
 import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 import { useTaskWorkspaceSnapshotValue } from "@/stores/workspace-metadata-store";
 import type { BoardCard as BoardCardModel, BoardColumnId, ReviewTaskWorkspaceSnapshot } from "@/types";
@@ -25,6 +26,7 @@ import { DEFAULT_TEXT_MEASURE_FONT, measureTextWidth, readElementFontShorthand }
 interface CardSessionActivity {
 	dotColor: string;
 	text: string;
+	statusKind: RuntimeTaskSessionStatusKind;
 }
 
 const SESSION_ACTIVITY_COLOR = {
@@ -55,7 +57,9 @@ function reconstructTaskWorktreeDisplayPath(taskId: string, workspacePath: strin
 
 function extractToolInputSummaryFromActivityText(activityText: string, toolName: string): string | null {
 	const escapedToolName = toolName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	const match = activityText.match(new RegExp(`^(?:Using|Completed|Failed|Calling)\\s+${escapedToolName}(?::\\s*(.+))?$`));
+	const match = activityText.match(
+		new RegExp(`^(?:Using|Completed|Failed|Calling)\\s+${escapedToolName}(?::\\s*(.+))?$`),
+	);
 	if (!match) {
 		return null;
 	}
@@ -70,7 +74,9 @@ function extractToolInputSummaryFromActivityText(activityText: string, toolName:
 	return rawSummary;
 }
 
-function parseToolCallFromActivityText(activityText: string): { toolName: string; toolInputSummary: string | null } | null {
+function parseToolCallFromActivityText(
+	activityText: string,
+): { toolName: string; toolInputSummary: string | null } | null {
 	const match = activityText.match(/^(?:Using|Completed|Failed|Calling)\s+([^:()]+?)(?::\s*(.+))?$/);
 	if (!match?.[1]) {
 		return null;
@@ -102,7 +108,10 @@ function resolveToolCallLabel(
 	toolInputSummary: string | null,
 ): string | null {
 	if (toolName) {
-		return formatToolCallLabel(toolName, toolInputSummary ?? extractToolInputSummaryFromActivityText(activityText ?? "", toolName));
+		return formatToolCallLabel(
+			toolName,
+			toolInputSummary ?? extractToolInputSummaryFromActivityText(activityText ?? "", toolName),
+		);
 	}
 	if (!activityText) {
 		return null;
@@ -114,18 +123,63 @@ function resolveToolCallLabel(
 	return formatToolCallLabel(parsed.toolName, parsed.toolInputSummary);
 }
 
+function normalizeAttentionDetail(value: string | null | undefined): string | null {
+	const normalized = value?.trim();
+	if (!normalized) {
+		return null;
+	}
+	if (normalized.startsWith("Final: ")) {
+		return normalized.slice(7).trim() || null;
+	}
+	if (normalized.startsWith("Agent: ")) {
+		return normalized.slice(7).trim() || null;
+	}
+	if (
+		normalized === "Waiting for approval" ||
+		normalized === "Waiting for review" ||
+		normalized === "Agent active" ||
+		normalized === "Working on task"
+	) {
+		return null;
+	}
+	return normalized;
+}
+
 function getCardSessionActivity(summary: RuntimeTaskSessionSummary | undefined): CardSessionActivity | null {
 	if (!summary) {
 		return null;
 	}
+	const sessionStatus = getRuntimeTaskSessionStatus(summary);
 	const hookActivity = summary.latestHookActivity;
 	const activityText = hookActivity?.activityText?.trim();
 	const toolName = hookActivity?.toolName?.trim() ?? null;
 	const toolInputSummary = hookActivity?.toolInputSummary?.trim() ?? null;
 	const finalMessage = hookActivity?.finalMessage?.trim();
 	const hookEventName = hookActivity?.hookEventName?.trim() ?? null;
+	const attentionDetail = normalizeAttentionDetail(finalMessage ?? activityText ?? null);
+	if (sessionStatus.kind === "needs_approval") {
+		return {
+			dotColor: SESSION_ACTIVITY_COLOR.waiting,
+			text: attentionDetail ? `Needs approval: ${attentionDetail}` : "Needs approval to continue",
+			statusKind: sessionStatus.kind,
+		};
+	}
+	if (sessionStatus.kind === "needs_input") {
+		return {
+			dotColor: SESSION_ACTIVITY_COLOR.waiting,
+			text: attentionDetail ? `Needs input: ${attentionDetail}` : "Needs your input to continue",
+			statusKind: sessionStatus.kind,
+		};
+	}
+	if (sessionStatus.kind === "needs_review") {
+		return {
+			dotColor: SESSION_ACTIVITY_COLOR.error,
+			text: attentionDetail ? `Needs review: ${attentionDetail}` : "Needs review before it can continue",
+			statusKind: sessionStatus.kind,
+		};
+	}
 	if (summary.state === "awaiting_review" && finalMessage) {
-		return { dotColor: SESSION_ACTIVITY_COLOR.success, text: finalMessage };
+		return { dotColor: SESSION_ACTIVITY_COLOR.success, text: finalMessage, statusKind: sessionStatus.kind };
 	}
 	if (
 		finalMessage &&
@@ -135,10 +189,12 @@ function getCardSessionActivity(summary: RuntimeTaskSessionSummary | undefined):
 		return {
 			dotColor: summary.state === "running" ? SESSION_ACTIVITY_COLOR.thinking : SESSION_ACTIVITY_COLOR.success,
 			text: finalMessage,
+			statusKind: sessionStatus.kind,
 		};
 	}
 	if (activityText) {
-		let dotColor: string = summary.state === "failed" ? SESSION_ACTIVITY_COLOR.error : SESSION_ACTIVITY_COLOR.thinking;
+		let dotColor: string =
+			summary.state === "failed" ? SESSION_ACTIVITY_COLOR.error : SESSION_ACTIVITY_COLOR.thinking;
 		let text = activityText;
 		const toolCallLabel = resolveToolCallLabel(activityText, toolName, toolInputSummary);
 		if (toolCallLabel) {
@@ -148,6 +204,7 @@ function getCardSessionActivity(summary: RuntimeTaskSessionSummary | undefined):
 			return {
 				dotColor,
 				text: toolCallLabel,
+				statusKind: sessionStatus.kind,
 			};
 		}
 		if (text.startsWith("Final: ")) {
@@ -162,19 +219,19 @@ function getCardSessionActivity(summary: RuntimeTaskSessionSummary | undefined):
 		} else if (text.startsWith("Failed ")) {
 			dotColor = SESSION_ACTIVITY_COLOR.error;
 		} else if (text === "Agent active" || text === "Working on task" || text.startsWith("Resumed")) {
-			return { dotColor: SESSION_ACTIVITY_COLOR.thinking, text: "Thinking..." };
+			return { dotColor: SESSION_ACTIVITY_COLOR.thinking, text: "Thinking...", statusKind: sessionStatus.kind };
 		}
-		return { dotColor, text };
+		return { dotColor, text, statusKind: sessionStatus.kind };
 	}
 	if (summary.state === "failed") {
 		const failedText = finalMessage ?? activityText ?? "Task failed to start";
-		return { dotColor: SESSION_ACTIVITY_COLOR.error, text: failedText };
+		return { dotColor: SESSION_ACTIVITY_COLOR.error, text: failedText, statusKind: sessionStatus.kind };
 	}
 	if (summary.state === "awaiting_review") {
-		return { dotColor: SESSION_ACTIVITY_COLOR.success, text: "Waiting for review" };
+		return { dotColor: SESSION_ACTIVITY_COLOR.success, text: "Waiting for review", statusKind: sessionStatus.kind };
 	}
 	if (summary.state === "running") {
-		return { dotColor: SESSION_ACTIVITY_COLOR.thinking, text: "Thinking..." };
+		return { dotColor: SESSION_ACTIVITY_COLOR.thinking, text: "Thinking...", statusKind: sessionStatus.kind };
 	}
 	return null;
 }
@@ -257,6 +314,7 @@ export function BoardCard({
 	const displayPrompt = useMemo(() => {
 		return card.prompt.trim();
 	}, [card.prompt]);
+	const sessionStatus = useMemo(() => getRuntimeTaskSessionStatus(sessionSummary ?? null), [sessionSummary]);
 	const rawSessionActivity = useMemo(() => getCardSessionActivity(sessionSummary), [sessionSummary]);
 	const lastSessionActivityRef = useRef<CardSessionActivity | null>(null);
 	const lastSessionActivityCardIdRef = useRef<string | null>(null);
@@ -422,6 +480,16 @@ export function BoardCard({
 	const isAnyGitActionLoading = isCommitLoading || isOpenPrLoading;
 	const cancelAutomaticActionLabel =
 		!isTrashCard && card.autoReviewEnabled ? getTaskAutoReviewCancelButtonLabel(card.autoReviewMode) : null;
+	const attentionBadgeLabel =
+		sessionStatus.kind === "needs_approval" ||
+		sessionStatus.kind === "needs_input" ||
+		sessionStatus.kind === "needs_review"
+			? sessionStatus.label
+			: null;
+	const attentionBadgeClassName =
+		sessionStatus.kind === "needs_review"
+			? "border-status-red/40 bg-status-red/10 text-status-red"
+			: "border-status-orange/40 bg-status-orange/10 text-status-orange";
 
 	const renderCardShell = (input: {
 		dragHandleProps?: HTMLAttributes<HTMLElement> | null;
@@ -497,6 +565,10 @@ export function BoardCard({
 						isHovered && isCardInteractive && "bg-surface-3 border-border-bright",
 						isDependencySource && "kb-board-card-dependency-source",
 						isDependencyTarget && "kb-board-card-dependency-target",
+						attentionBadgeLabel && "ring-1 ring-inset",
+						sessionStatus.kind === "needs_review" && "border-status-red/40 ring-status-red/30",
+						(sessionStatus.kind === "needs_approval" || sessionStatus.kind === "needs_input") &&
+							"border-status-orange/40 ring-status-orange/30",
 					)}
 				>
 					{projectLabel ? (
@@ -520,6 +592,17 @@ export function BoardCard({
 								{displayPromptSplit.title}
 							</p>
 						</div>
+						{attentionBadgeLabel ? (
+							<span
+								className={cn(
+									"inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.04em]",
+									"animate-pulse",
+									attentionBadgeClassName,
+								)}
+							>
+								{attentionBadgeLabel}
+							</span>
+						) : null}
 						{columnId === "backlog" ? (
 							<Button
 								icon={<Play size={14} />}
@@ -645,7 +728,10 @@ export function BoardCard({
 							<div ref={sessionPreviewContainerRef} className="min-w-0 flex-1">
 								<p
 									ref={sessionPreviewRef}
-									className={cn("m-0 font-mono", !isSessionPreviewMeasured && !isSessionPreviewExpanded && "line-clamp-6")}
+									className={cn(
+										"m-0 font-mono",
+										!isSessionPreviewMeasured && !isSessionPreviewExpanded && "line-clamp-6",
+									)}
 									style={{
 										fontSize: 12,
 										whiteSpace: "normal",

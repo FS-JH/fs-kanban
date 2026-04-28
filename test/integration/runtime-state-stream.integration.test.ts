@@ -159,6 +159,23 @@ function commitAll(cwd: string, message: string): string {
 	return runGit(cwd, ["rev-parse", "HEAD"]);
 }
 
+function createIsolatedRuntimeTestEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+	const env = createGitTestEnv();
+	for (const key of Object.keys(env)) {
+		if (key.startsWith("KANBAN_")) {
+			delete env[key];
+		}
+	}
+	delete env.HTTPS_PORT;
+	delete env.TLS_CERT;
+	delete env.TLS_KEY;
+	return {
+		...env,
+		KANBAN_RUNTIME_HOST: "127.0.0.1",
+		...overrides,
+	};
+}
+
 function resolveShutdownIpcHookPath(): string {
 	return resolve(process.cwd(), "test/integration/shutdown-ipc-hook.cjs");
 }
@@ -281,7 +298,7 @@ async function startKanbanServer(input: { cwd: string; homeDir: string; port: nu
 		],
 		{
 			cwd: input.cwd,
-			env: createGitTestEnv({
+			env: createIsolatedRuntimeTestEnv({
 				HOME: input.homeDir,
 				USERPROFILE: input.homeDir,
 				KANBAN_RUNTIME_PORT: String(input.port),

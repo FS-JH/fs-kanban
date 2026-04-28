@@ -4,11 +4,8 @@
 import { readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-
+import { isRuntimeAgentLaunchSupported } from "../core/agent-catalog.js";
 import type { RuntimeAgentId, RuntimeProjectShortcut } from "../core/api-contract.js";
-import {
-	isRuntimeAgentLaunchSupported,
-} from "../core/agent-catalog.js";
 import { type LockRequest, lockedFileSystem } from "../fs/locked-file-system.js";
 import { detectInstalledCommands } from "../terminal/agent-registry.js";
 import { areRuntimeProjectShortcutsEqual } from "./shortcut-utils.js";
@@ -18,6 +15,8 @@ interface RuntimeGlobalConfigFileShape {
 	fallbackAgentId?: RuntimeAgentId | null;
 	selectedShortcutLabel?: string;
 	agentAutonomousModeEnabled?: boolean;
+	agentAttentionNotificationsEnabled?: boolean;
+	agentAttentionSoundEnabled?: boolean;
 	readyForReviewNotificationsEnabled?: boolean;
 	commitPromptTemplate?: string;
 	openPrPromptTemplate?: string;
@@ -34,6 +33,8 @@ export interface RuntimeConfigState {
 	fallbackAgentId: RuntimeAgentId | null;
 	selectedShortcutLabel: string | null;
 	agentAutonomousModeEnabled: boolean;
+	agentAttentionNotificationsEnabled: boolean;
+	agentAttentionSoundEnabled: boolean;
 	readyForReviewNotificationsEnabled: boolean;
 	shortcuts: RuntimeProjectShortcut[];
 	commitPromptTemplate: string;
@@ -47,6 +48,8 @@ export interface RuntimeConfigUpdateInput {
 	fallbackAgentId?: RuntimeAgentId | null;
 	selectedShortcutLabel?: string | null;
 	agentAutonomousModeEnabled?: boolean;
+	agentAttentionNotificationsEnabled?: boolean;
+	agentAttentionSoundEnabled?: boolean;
 	readyForReviewNotificationsEnabled?: boolean;
 	shortcuts?: RuntimeProjectShortcut[];
 	commitPromptTemplate?: string;
@@ -62,6 +65,8 @@ const PROJECT_CONFIG_FILENAME = "config.json";
 const DEFAULT_AGENT_ID: RuntimeAgentId = "codex";
 const AUTO_SELECT_AGENT_PRIORITY: readonly RuntimeAgentId[] = ["codex", "claude"];
 const DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED = true;
+const DEFAULT_AGENT_ATTENTION_NOTIFICATIONS_ENABLED = true;
+const DEFAULT_AGENT_ATTENTION_SOUND_ENABLED = false;
 const DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED = true;
 const DEFAULT_COMMIT_PROMPT_TEMPLATE = `You are in a worktree on a detached HEAD. When you are finished with the task, commit the working changes onto {{base_ref}}.
 
@@ -291,6 +296,14 @@ function toRuntimeConfigState({
 			globalConfig?.agentAutonomousModeEnabled,
 			DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED,
 		),
+		agentAttentionNotificationsEnabled: normalizeBoolean(
+			globalConfig?.agentAttentionNotificationsEnabled,
+			DEFAULT_AGENT_ATTENTION_NOTIFICATIONS_ENABLED,
+		),
+		agentAttentionSoundEnabled: normalizeBoolean(
+			globalConfig?.agentAttentionSoundEnabled,
+			DEFAULT_AGENT_ATTENTION_SOUND_ENABLED,
+		),
 		readyForReviewNotificationsEnabled: normalizeBoolean(
 			globalConfig?.readyForReviewNotificationsEnabled,
 			DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED,
@@ -322,6 +335,8 @@ async function writeRuntimeGlobalConfigFile(
 		fallbackAgentId?: RuntimeAgentId | null;
 		selectedShortcutLabel?: string | null;
 		agentAutonomousModeEnabled?: boolean;
+		agentAttentionNotificationsEnabled?: boolean;
+		agentAttentionSoundEnabled?: boolean;
 		readyForReviewNotificationsEnabled?: boolean;
 		commitPromptTemplate?: string;
 		openPrPromptTemplate?: string;
@@ -349,6 +364,14 @@ async function writeRuntimeGlobalConfigFile(
 		config.agentAutonomousModeEnabled === undefined
 			? DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED
 			: normalizeBoolean(config.agentAutonomousModeEnabled, DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED);
+	const agentAttentionNotificationsEnabled =
+		config.agentAttentionNotificationsEnabled === undefined
+			? DEFAULT_AGENT_ATTENTION_NOTIFICATIONS_ENABLED
+			: normalizeBoolean(config.agentAttentionNotificationsEnabled, DEFAULT_AGENT_ATTENTION_NOTIFICATIONS_ENABLED);
+	const agentAttentionSoundEnabled =
+		config.agentAttentionSoundEnabled === undefined
+			? DEFAULT_AGENT_ATTENTION_SOUND_ENABLED
+			: normalizeBoolean(config.agentAttentionSoundEnabled, DEFAULT_AGENT_ATTENTION_SOUND_ENABLED);
 	const readyForReviewNotificationsEnabled =
 		config.readyForReviewNotificationsEnabled === undefined
 			? DEFAULT_READY_FOR_REVIEW_NOTIFICATIONS_ENABLED
@@ -389,6 +412,18 @@ async function writeRuntimeGlobalConfigFile(
 		agentAutonomousModeEnabled !== DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED
 	) {
 		payload.agentAutonomousModeEnabled = agentAutonomousModeEnabled;
+	}
+	if (
+		hasOwnKey(existing, "agentAttentionNotificationsEnabled") ||
+		agentAttentionNotificationsEnabled !== DEFAULT_AGENT_ATTENTION_NOTIFICATIONS_ENABLED
+	) {
+		payload.agentAttentionNotificationsEnabled = agentAttentionNotificationsEnabled;
+	}
+	if (
+		hasOwnKey(existing, "agentAttentionSoundEnabled") ||
+		agentAttentionSoundEnabled !== DEFAULT_AGENT_ATTENTION_SOUND_ENABLED
+	) {
+		payload.agentAttentionSoundEnabled = agentAttentionSoundEnabled;
 	}
 	if (
 		hasOwnKey(existing, "readyForReviewNotificationsEnabled") ||
@@ -481,6 +516,8 @@ function createRuntimeConfigStateFromValues(input: {
 	fallbackAgentId: RuntimeAgentId | null;
 	selectedShortcutLabel: string | null;
 	agentAutonomousModeEnabled: boolean;
+	agentAttentionNotificationsEnabled: boolean;
+	agentAttentionSoundEnabled: boolean;
 	readyForReviewNotificationsEnabled: boolean;
 	shortcuts: RuntimeProjectShortcut[];
 	commitPromptTemplate: string;
@@ -495,6 +532,14 @@ function createRuntimeConfigStateFromValues(input: {
 		agentAutonomousModeEnabled: normalizeBoolean(
 			input.agentAutonomousModeEnabled,
 			DEFAULT_AGENT_AUTONOMOUS_MODE_ENABLED,
+		),
+		agentAttentionNotificationsEnabled: normalizeBoolean(
+			input.agentAttentionNotificationsEnabled,
+			DEFAULT_AGENT_ATTENTION_NOTIFICATIONS_ENABLED,
+		),
+		agentAttentionSoundEnabled: normalizeBoolean(
+			input.agentAttentionSoundEnabled,
+			DEFAULT_AGENT_ATTENTION_SOUND_ENABLED,
 		),
 		readyForReviewNotificationsEnabled: normalizeBoolean(
 			input.readyForReviewNotificationsEnabled,
@@ -516,6 +561,8 @@ export function toGlobalRuntimeConfigState(current: RuntimeConfigState): Runtime
 		fallbackAgentId: current.fallbackAgentId,
 		selectedShortcutLabel: current.selectedShortcutLabel,
 		agentAutonomousModeEnabled: current.agentAutonomousModeEnabled,
+		agentAttentionNotificationsEnabled: current.agentAttentionNotificationsEnabled,
+		agentAttentionSoundEnabled: current.agentAttentionSoundEnabled,
 		readyForReviewNotificationsEnabled: current.readyForReviewNotificationsEnabled,
 		shortcuts: [],
 		commitPromptTemplate: current.commitPromptTemplate,
@@ -552,6 +599,8 @@ export async function saveRuntimeConfig(
 		fallbackAgentId: RuntimeAgentId | null;
 		selectedShortcutLabel: string | null;
 		agentAutonomousModeEnabled: boolean;
+		agentAttentionNotificationsEnabled: boolean;
+		agentAttentionSoundEnabled: boolean;
 		readyForReviewNotificationsEnabled: boolean;
 		shortcuts: RuntimeProjectShortcut[];
 		commitPromptTemplate: string;
@@ -565,6 +614,8 @@ export async function saveRuntimeConfig(
 			fallbackAgentId: config.fallbackAgentId,
 			selectedShortcutLabel: config.selectedShortcutLabel,
 			agentAutonomousModeEnabled: config.agentAutonomousModeEnabled,
+			agentAttentionNotificationsEnabled: config.agentAttentionNotificationsEnabled,
+			agentAttentionSoundEnabled: config.agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled: config.readyForReviewNotificationsEnabled,
 			commitPromptTemplate: config.commitPromptTemplate,
 			openPrPromptTemplate: config.openPrPromptTemplate,
@@ -577,6 +628,8 @@ export async function saveRuntimeConfig(
 			fallbackAgentId: config.fallbackAgentId,
 			selectedShortcutLabel: config.selectedShortcutLabel,
 			agentAutonomousModeEnabled: config.agentAutonomousModeEnabled,
+			agentAttentionNotificationsEnabled: config.agentAttentionNotificationsEnabled,
+			agentAttentionSoundEnabled: config.agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled: config.readyForReviewNotificationsEnabled,
 			shortcuts: config.shortcuts,
 			commitPromptTemplate: config.commitPromptTemplate,
@@ -601,6 +654,9 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			selectedShortcutLabel:
 				updates.selectedShortcutLabel === undefined ? current.selectedShortcutLabel : updates.selectedShortcutLabel,
 			agentAutonomousModeEnabled: updates.agentAutonomousModeEnabled ?? current.agentAutonomousModeEnabled,
+			agentAttentionNotificationsEnabled:
+				updates.agentAttentionNotificationsEnabled ?? current.agentAttentionNotificationsEnabled,
+			agentAttentionSoundEnabled: updates.agentAttentionSoundEnabled ?? current.agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled:
 				updates.readyForReviewNotificationsEnabled ?? current.readyForReviewNotificationsEnabled,
 			shortcuts: projectConfigPath ? (updates.shortcuts ?? current.shortcuts) : current.shortcuts,
@@ -613,6 +669,8 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			nextConfig.fallbackAgentId !== current.fallbackAgentId ||
 			nextConfig.selectedShortcutLabel !== current.selectedShortcutLabel ||
 			nextConfig.agentAutonomousModeEnabled !== current.agentAutonomousModeEnabled ||
+			nextConfig.agentAttentionNotificationsEnabled !== current.agentAttentionNotificationsEnabled ||
+			nextConfig.agentAttentionSoundEnabled !== current.agentAttentionSoundEnabled ||
 			nextConfig.readyForReviewNotificationsEnabled !== current.readyForReviewNotificationsEnabled ||
 			nextConfig.commitPromptTemplate !== current.commitPromptTemplate ||
 			nextConfig.openPrPromptTemplate !== current.openPrPromptTemplate ||
@@ -627,6 +685,8 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			fallbackAgentId: nextConfig.fallbackAgentId,
 			selectedShortcutLabel: nextConfig.selectedShortcutLabel,
 			agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
+			agentAttentionNotificationsEnabled: nextConfig.agentAttentionNotificationsEnabled,
+			agentAttentionSoundEnabled: nextConfig.agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
 			commitPromptTemplate: nextConfig.commitPromptTemplate,
 			openPrPromptTemplate: nextConfig.openPrPromptTemplate,
@@ -641,6 +701,8 @@ export async function updateRuntimeConfig(cwd: string, updates: RuntimeConfigUpd
 			fallbackAgentId: nextConfig.fallbackAgentId,
 			selectedShortcutLabel: nextConfig.selectedShortcutLabel,
 			agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
+			agentAttentionNotificationsEnabled: nextConfig.agentAttentionNotificationsEnabled,
+			agentAttentionSoundEnabled: nextConfig.agentAttentionSoundEnabled,
 			readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
 			shortcuts: nextConfig.shortcuts,
 			commitPromptTemplate: nextConfig.commitPromptTemplate,
@@ -667,10 +729,18 @@ export async function updateGlobalRuntimeConfig(
 				fallbackAgentId:
 					updates.fallbackAgentId === undefined
 						? current.fallbackAgentId
-						: normalizeFallbackAgentId(updates.fallbackAgentId, updates.selectedAgentId ?? current.selectedAgentId),
+						: normalizeFallbackAgentId(
+								updates.fallbackAgentId,
+								updates.selectedAgentId ?? current.selectedAgentId,
+							),
 				selectedShortcutLabel:
-					updates.selectedShortcutLabel === undefined ? current.selectedShortcutLabel : updates.selectedShortcutLabel,
+					updates.selectedShortcutLabel === undefined
+						? current.selectedShortcutLabel
+						: updates.selectedShortcutLabel,
 				agentAutonomousModeEnabled: updates.agentAutonomousModeEnabled ?? current.agentAutonomousModeEnabled,
+				agentAttentionNotificationsEnabled:
+					updates.agentAttentionNotificationsEnabled ?? current.agentAttentionNotificationsEnabled,
+				agentAttentionSoundEnabled: updates.agentAttentionSoundEnabled ?? current.agentAttentionSoundEnabled,
 				readyForReviewNotificationsEnabled:
 					updates.readyForReviewNotificationsEnabled ?? current.readyForReviewNotificationsEnabled,
 				shortcuts: current.shortcuts,
@@ -683,6 +753,8 @@ export async function updateGlobalRuntimeConfig(
 				nextConfig.fallbackAgentId !== current.fallbackAgentId ||
 				nextConfig.selectedShortcutLabel !== current.selectedShortcutLabel ||
 				nextConfig.agentAutonomousModeEnabled !== current.agentAutonomousModeEnabled ||
+				nextConfig.agentAttentionNotificationsEnabled !== current.agentAttentionNotificationsEnabled ||
+				nextConfig.agentAttentionSoundEnabled !== current.agentAttentionSoundEnabled ||
 				nextConfig.readyForReviewNotificationsEnabled !== current.readyForReviewNotificationsEnabled ||
 				nextConfig.commitPromptTemplate !== current.commitPromptTemplate ||
 				nextConfig.openPrPromptTemplate !== current.openPrPromptTemplate;
@@ -696,6 +768,8 @@ export async function updateGlobalRuntimeConfig(
 				fallbackAgentId: nextConfig.fallbackAgentId,
 				selectedShortcutLabel: nextConfig.selectedShortcutLabel,
 				agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
+				agentAttentionNotificationsEnabled: nextConfig.agentAttentionNotificationsEnabled,
+				agentAttentionSoundEnabled: nextConfig.agentAttentionSoundEnabled,
 				readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
 				commitPromptTemplate: nextConfig.commitPromptTemplate,
 				openPrPromptTemplate: nextConfig.openPrPromptTemplate,
@@ -708,6 +782,8 @@ export async function updateGlobalRuntimeConfig(
 				fallbackAgentId: nextConfig.fallbackAgentId,
 				selectedShortcutLabel: nextConfig.selectedShortcutLabel,
 				agentAutonomousModeEnabled: nextConfig.agentAutonomousModeEnabled,
+				agentAttentionNotificationsEnabled: nextConfig.agentAttentionNotificationsEnabled,
+				agentAttentionSoundEnabled: nextConfig.agentAttentionSoundEnabled,
 				readyForReviewNotificationsEnabled: nextConfig.readyForReviewNotificationsEnabled,
 				shortcuts: nextConfig.shortcuts,
 				commitPromptTemplate: nextConfig.commitPromptTemplate,

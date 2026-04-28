@@ -1,5 +1,5 @@
 import { Droppable } from "@hello-pangea/dnd";
-import { Play, Plus, Trash2 } from "lucide-react";
+import { Play, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 
 import { BoardCard } from "@/components/board-card";
@@ -15,6 +15,7 @@ export function BoardColumn({
 	onCreateTask,
 	onStartTask,
 	onStartAllTasks,
+	onRunBacklogCleanup,
 	onClearTrash,
 	editingTaskId,
 	inlineTaskEditor,
@@ -43,6 +44,7 @@ export function BoardColumn({
 	onCreateTask?: () => void;
 	onStartTask?: (taskId: string) => void;
 	onStartAllTasks?: () => void;
+	onRunBacklogCleanup?: () => void;
 	onClearTrash?: () => void;
 	editingTaskId?: string | null;
 	inlineTaskEditor?: ReactNode;
@@ -68,6 +70,7 @@ export function BoardColumn({
 }): React.ReactElement {
 	const canCreate = column.id === "backlog" && onCreateTask;
 	const canStartAllTasks = column.id === "backlog" && onStartAllTasks;
+	const canRunBacklogCleanup = column.id === "backlog" && onRunBacklogCleanup;
 	const canClearTrash = column.id === "trash" && onClearTrash;
 	const cardDropType = "CARD";
 	const isDropDisabled = isCardDropDisabled(column.id, activeDragSourceColumnId ?? null, {
@@ -101,13 +104,24 @@ export function BoardColumn({
 				>
 					<div className="flex items-center gap-2">
 						<ColumnIndicator columnId={column.id} />
-						<span className="font-semibold text-sm">
-							{column.title}
-						</span>
-						<span className="text-text-secondary text-xs">
-							{column.cards.length}
-						</span>
+						<span className="font-semibold text-sm">{column.title}</span>
+						<span className="text-text-secondary text-xs">{column.cards.length}</span>
 					</div>
+					{canRunBacklogCleanup ? (
+						<Button
+							icon={<Sparkles size={14} />}
+							variant="ghost"
+							size="sm"
+							onClick={onRunBacklogCleanup}
+							disabled={column.cards.length === 0}
+							aria-label="Clean up backlog with board agent"
+							title={
+								column.cards.length > 0
+									? "Review and clean up backlog with the board agent"
+									: "Backlog is empty"
+							}
+						/>
+					) : null}
 					{canStartAllTasks ? (
 						<Button
 							icon={<Play size={14} />}
@@ -208,4 +222,3 @@ export function BoardColumn({
 		</section>
 	);
 }
-

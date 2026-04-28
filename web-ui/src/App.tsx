@@ -4,9 +4,8 @@
 import { FolderOpen } from "lucide-react";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-import { notifyError, showAppToast } from "@/components/app-toaster";
 import { ActiveProjectsBoard } from "@/components/active-projects-board";
+import { notifyError, showAppToast } from "@/components/app-toaster";
 import { CardDetailView } from "@/components/card-detail-view";
 import { ClearTrashDialog } from "@/components/clear-trash-dialog";
 import { DebugDialog } from "@/components/debug-dialog";
@@ -34,9 +33,9 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { createInitialBoardData } from "@/data/board-data";
 import { createIdleTaskSession } from "@/hooks/app-utils";
+import { RuntimeDisconnectedFallback } from "@/hooks/runtime-disconnected-fallback";
 import { useAggregateBoard } from "@/hooks/use-aggregate-board";
 import { useAggregateBoardActions } from "@/hooks/use-aggregate-board-actions";
-import { RuntimeDisconnectedFallback } from "@/hooks/runtime-disconnected-fallback";
 import { useAppHotkeys } from "@/hooks/use-app-hotkeys";
 import { useBoardInteractions } from "@/hooks/use-board-interactions";
 import { useDebugTools } from "@/hooks/use-debug-tools";
@@ -55,12 +54,10 @@ import { useTaskEditor } from "@/hooks/use-task-editor";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useTaskStartActions } from "@/hooks/use-task-start-actions";
 import { useTerminalPanels } from "@/hooks/use-terminal-panels";
-import { useWorkspaceSync } from "@/hooks/use-workspace-sync";
 import { useWorkspaceSnapshotCache } from "@/hooks/use-workspace-snapshot-cache";
-import {
-	getTaskAgentNavbarHint,
-	isTaskAgentSetupSatisfied,
-} from "@/runtime/native-agent";
+import { useWorkspaceSync } from "@/hooks/use-workspace-sync";
+import { getTaskAgentNavbarHint, isTaskAgentSetupSatisfied } from "@/runtime/native-agent";
+import { getRuntimeTaskSessionStatus } from "@/runtime/task-session-status";
 import type { RuntimeAggregateBoardCard, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { useRuntimeProjectConfig } from "@/runtime/use-runtime-project-config";
 import { useTerminalConnectionReady } from "@/runtime/use-terminal-connection-ready";
@@ -75,6 +72,16 @@ import {
 } from "@/stores/workspace-metadata-store";
 import { TERMINAL_THEME_COLORS } from "@/terminal/theme-colors";
 import type { BoardData } from "@/types";
+
+const BACKLOG_CLEANUP_PROMPT = `Review the current backlog for this workspace and clean it up.
+
+- Determine which backlog tasks are still relevant, already completed, duplicates, or stale.
+- When you are confident a backlog task is already done, duplicated, or no longer relevant, move it to trash.
+- Tighten vague backlog prompts so the remaining tasks are actionable and specific.
+- If a task should be started now and is clearly ready, start it.
+- If a task needs to be split, linked, or replaced by better-scoped tasks, do that.
+- Only stop to ask me about items that are genuinely ambiguous or risky.
+- Finish with a concise summary of what you changed and what still needs a human decision.`;
 
 export default function App(): ReactElement {
 	const [board, setBoard] = useState<BoardData>(() => createInitialBoardData());
@@ -178,6 +185,8 @@ export default function App(): ReactElement {
 		markConnectionReady: markTerminalConnectionReady,
 		prepareWaitForConnection: prepareWaitForTerminalConnectionReady,
 	} = useTerminalConnectionReady();
+	const agentAttentionNotificationsEnabled = runtimeProjectConfig?.agentAttentionNotificationsEnabled ?? true;
+	const agentAttentionSoundEnabled = runtimeProjectConfig?.agentAttentionSoundEnabled ?? false;
 	const readyForReviewNotificationsEnabled = runtimeProjectConfig?.readyForReviewNotificationsEnabled ?? true;
 	const shortcuts = runtimeProjectConfig?.shortcuts ?? [];
 	const selectedShortcutLabel = useMemo(() => {
@@ -271,8 +280,7 @@ export default function App(): ReactElement {
 	const displayedBoard = cachedNavigationWorkspaceSnapshot?.workspaceState.board ?? board;
 	const displayedSessions = cachedNavigationWorkspaceSnapshot?.workspaceState.sessions ?? sessions;
 	const displayedWorkspacePath = cachedNavigationWorkspaceSnapshot?.workspaceState.repoPath ?? workspacePath;
-	const sidebarProjects =
-		isAggregateView && hasReceivedAggregateSnapshot ? aggregateProjects : displayedProjects;
+	const sidebarProjects = isAggregateView && hasReceivedAggregateSnapshot ? aggregateProjects : displayedProjects;
 	const sidebarIsLoadingProjects =
 		isAggregateView && !hasReceivedAggregateSnapshot && !aggregateStreamError ? true : isProjectListLoading;
 	const shouldShowProjectLoadingStateWithCache =
@@ -280,6 +288,8 @@ export default function App(): ReactElement {
 
 	useReviewReadyNotifications({
 		activeWorkspaceId: activeNotificationWorkspaceId,
+		agentAttentionNotificationsEnabled,
+		agentAttentionSoundEnabled,
 		board,
 		isDocumentVisible,
 		latestTaskReadyForReview,
@@ -450,22 +460,27 @@ export default function App(): ReactElement {
 		terminalBackgroundColor: TERMINAL_THEME_COLORS.surfacePrimary,
 	});
 	const homeTerminalSummary = sessions[homeTerminalTaskId] ?? null;
-	const homeSidebarAgentPanel = useHomeSidebarAgentPanel({
+	const {
+		panel: homeSidebarAgentPanel,
+		summary: homeSidebarAgentSummary,
+		taskId: homeSidebarAgentTaskId,
+	} = useHomeSidebarAgentPanel({
 		currentProjectId,
 		hasNoProjects,
 		runtimeProjectConfig,
 		taskSessions: sessions,
 		workspaceGit,
 	});
-	const { runningShortcutLabel, handleSelectShortcutLabel, handleRunShortcut, handleCreateShortcut } = useShortcutActions({
-		currentProjectId,
-		selectedShortcutLabel: runtimeProjectConfig?.selectedShortcutLabel,
-		shortcuts,
-		refreshRuntimeProjectConfig,
-		prepareTerminalForShortcut,
-		prepareWaitForTerminalConnectionReady,
-		sendTaskSessionInput,
-	});
+	const { runningShortcutLabel, handleSelectShortcutLabel, handleRunShortcut, handleCreateShortcut } =
+		useShortcutActions({
+			currentProjectId,
+			selectedShortcutLabel: runtimeProjectConfig?.selectedShortcutLabel,
+			shortcuts,
+			refreshRuntimeProjectConfig,
+			prepareTerminalForShortcut,
+			prepareWaitForTerminalConnectionReady,
+			sendTaskSessionInput,
+		});
 
 	const persistWorkspaceStateAsync = useCallback(
 		async (input: { workspaceId: string; payload: Parameters<typeof saveWorkspaceState>[1] }) =>
@@ -665,6 +680,75 @@ export default function App(): ReactElement {
 		setSelectedTaskId,
 	});
 
+	const handleRunBacklogCleanup = useCallback(async () => {
+		const backlogColumn = board.columns.find((column) => column.id === "backlog");
+		if (!currentProjectId || !homeSidebarAgentTaskId) {
+			notifyError("Board agent is not ready yet. Open Settings and make sure an agent CLI is configured.");
+			return;
+		}
+		if (!homeSidebarAgentSummary) {
+			showAppToast({
+				intent: "warning",
+				message: "Board agent is still starting. Try backlog cleanup again in a moment.",
+				timeout: 4000,
+			});
+			return;
+		}
+		if (!backlogColumn || backlogColumn.cards.length === 0) {
+			showAppToast({
+				intent: "warning",
+				message: "Backlog is already empty.",
+				timeout: 4000,
+			});
+			return;
+		}
+		const homeAgentStatus = getRuntimeTaskSessionStatus(homeSidebarAgentSummary);
+		if (homeAgentStatus.kind === "running") {
+			showAppToast({
+				intent: "warning",
+				message: "Board agent is already running. Let it finish before starting backlog cleanup.",
+				timeout: 6000,
+			});
+			return;
+		}
+		if (homeAgentStatus.kind === "needs_approval") {
+			showAppToast({
+				intent: "warning",
+				message: "Board agent is already waiting for approval. Approve that step before starting backlog cleanup.",
+				timeout: 6000,
+			});
+			return;
+		}
+		if (homeAgentStatus.kind === "needs_input" || homeAgentStatus.kind === "needs_review") {
+			showAppToast({
+				intent: "warning",
+				message: "Board agent already needs your attention. Resolve that first, then run cleanup again.",
+				timeout: 6000,
+			});
+			return;
+		}
+		if (homeAgentStatus.kind === "failed" || homeAgentStatus.kind === "interrupted") {
+			showAppToast({
+				intent: "danger",
+				message: "Board agent is not in a usable state. Restart it before running backlog cleanup.",
+				timeout: 6000,
+			});
+			return;
+		}
+		const result = await sendTaskSessionInput(homeSidebarAgentTaskId, BACKLOG_CLEANUP_PROMPT, {
+			appendNewline: true,
+		});
+		if (!result.ok) {
+			notifyError(result.message ?? "Could not start backlog cleanup.");
+			return;
+		}
+		showAppToast({
+			intent: "success",
+			message: "Backlog cleanup started in the board agent.",
+			timeout: 4000,
+		});
+	}, [board.columns, currentProjectId, homeSidebarAgentSummary, homeSidebarAgentTaskId, sendTaskSessionInput]);
+
 	useAppHotkeys({
 		selectedCard,
 		isDetailTerminalOpen,
@@ -722,9 +806,9 @@ export default function App(): ReactElement {
 			undefined)
 		: isAggregateView
 			? "All Projects"
-		: shouldUseNavigationPath
-			? (navigationProjectPath ?? undefined)
-			: (displayedWorkspacePath ?? undefined);
+			: shouldUseNavigationPath
+				? (navigationProjectPath ?? undefined)
+				: (displayedWorkspacePath ?? undefined);
 
 	const activeWorkspaceHint = useMemo(() => {
 		if (!selectedCard) {
@@ -744,7 +828,8 @@ export default function App(): ReactElement {
 	const navbarWorkspaceHint = hasNoProjects ? undefined : activeWorkspaceHint;
 	const navbarRuntimeHint = hasNoProjects ? undefined : runtimeHint;
 	const shouldHideProjectDependentTopBarActions =
-		isAggregateView || (!selectedCard && (isProjectSwitching || isAwaitingWorkspaceSnapshot || isWorkspaceMetadataPending));
+		isAggregateView ||
+		(!selectedCard && (isProjectSwitching || isAwaitingWorkspaceSnapshot || isWorkspaceMetadataPending));
 
 	const {
 		openTargetOptions,
@@ -802,21 +887,21 @@ export default function App(): ReactElement {
 
 	return (
 		<div className="flex h-[100svh] min-w-0 overflow-hidden">
-				{!selectedCard ? (
-					<ProjectNavigationPanel
-						projects={sidebarProjects}
-						isLoadingProjects={sidebarIsLoadingProjects}
-						currentProjectId={navigationCurrentProjectId}
-						isAllProjectsSelected={isAggregateView}
-						removingProjectId={removingProjectId}
-						activeSection={homeSidebarSection}
-						onActiveSectionChange={setHomeSidebarSection}
-						canShowAgentSection={!isAggregateView && !hasNoProjects && Boolean(currentProjectId)}
-						agentSectionContent={homeSidebarAgentPanel}
-						onSelectAllProjects={handleSelectAllProjects}
-						onSelectProject={(projectId) => {
-							void handleSelectProject(projectId);
-						}}
+			{!selectedCard ? (
+				<ProjectNavigationPanel
+					projects={sidebarProjects}
+					isLoadingProjects={sidebarIsLoadingProjects}
+					currentProjectId={navigationCurrentProjectId}
+					isAllProjectsSelected={isAggregateView}
+					removingProjectId={removingProjectId}
+					activeSection={homeSidebarSection}
+					onActiveSectionChange={setHomeSidebarSection}
+					canShowAgentSection={!isAggregateView && !hasNoProjects && Boolean(currentProjectId)}
+					agentSectionContent={homeSidebarAgentPanel}
+					onSelectAllProjects={handleSelectAllProjects}
+					onSelectProject={(projectId) => {
+						void handleSelectProject(projectId);
+					}}
 					onRemoveProject={handleRemoveProject}
 					onAddProject={() => {
 						void handleAddProject();
@@ -863,7 +948,9 @@ export default function App(): ReactElement {
 								: handleToggleHomeTerminal
 					}
 					isTerminalOpen={isAggregateView ? false : selectedCard ? isDetailTerminalOpen : showHomeBottomTerminal}
-					isTerminalLoading={isAggregateView ? false : selectedCard ? isDetailTerminalStarting : isHomeTerminalStarting}
+					isTerminalLoading={
+						isAggregateView ? false : selectedCard ? isDetailTerminalStarting : isHomeTerminalStarting
+					}
 					onOpenSettings={handleOpenSettings}
 					showDebugButton={debugModeEnabled}
 					onOpenDebugDialog={debugModeEnabled ? handleOpenDebugDialog : undefined}
@@ -957,6 +1044,7 @@ export default function App(): ReactElement {
 												onCreateTask={handleOpenCreateTask}
 												onStartTask={handleStartTaskFromBoard}
 												onStartAllTasks={handleStartAllBacklogTasksFromBoard}
+												onRunBacklogCleanup={handleRunBacklogCleanup}
 												onClearTrash={handleOpenClearTrash}
 												editingTaskId={editingTaskId}
 												inlineTaskEditor={inlineTaskEditor}
@@ -1037,6 +1125,7 @@ export default function App(): ReactElement {
 								onCreateTask={handleOpenCreateTask}
 								onStartTask={handleStartTaskFromBoard}
 								onStartAllTasks={handleStartAllBacklogTasksFromBoard}
+								onRunBacklogCleanup={handleRunBacklogCleanup}
 								onClearTrash={handleOpenClearTrash}
 								editingTaskId={editingTaskId}
 								inlineTaskEditor={inlineTaskEditor}
@@ -1171,7 +1260,9 @@ export default function App(): ReactElement {
 				<AlertDialogBody>
 					<AlertDialogDescription asChild>
 						<div className="flex flex-col gap-3">
-							<p>FS Kanban requires git to manage worktrees for tasks. This folder is not a git repository yet.</p>
+							<p>
+								FS Kanban requires git to manage worktrees for tasks. This folder is not a git repository yet.
+							</p>
 							{pendingGitInitializationPath ? (
 								<p className="font-mono text-xs text-text-secondary break-all">
 									{pendingGitInitializationPath}

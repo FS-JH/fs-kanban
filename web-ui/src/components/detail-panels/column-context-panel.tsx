@@ -1,5 +1,5 @@
 import { type BeforeCapture, DragDropContext, Droppable, type DropResult } from "@hello-pangea/dnd";
-import { ChevronDown, ChevronRight, Play, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Play, Sparkles, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -19,6 +19,7 @@ function ColumnSection({
 	onCreateTask,
 	onStartTask,
 	onStartAllTasks,
+	onRunBacklogCleanup,
 	onClearTrash,
 	editingTaskId,
 	inlineTaskEditor,
@@ -41,6 +42,7 @@ function ColumnSection({
 	onCreateTask?: () => void;
 	onStartTask?: (taskId: string) => void;
 	onStartAllTasks?: () => void;
+	onRunBacklogCleanup?: () => void;
 	onClearTrash?: () => void;
 	editingTaskId?: string | null;
 	inlineTaskEditor?: ReactNode;
@@ -58,6 +60,7 @@ function ColumnSection({
 	const [open, setOpen] = useState(defaultOpen);
 	const canCreate = column.id === "backlog" && onCreateTask;
 	const canStartAllTasks = column.id === "backlog" && onStartAllTasks;
+	const canRunBacklogCleanup = column.id === "backlog" && onRunBacklogCleanup;
 	const canClearTrash = column.id === "trash" && onClearTrash;
 	const cardDropType = "CARD";
 	const isDropDisabled = isCardDropDisabled(column.id, activeDragSourceColumnId ?? null);
@@ -111,6 +114,20 @@ function ColumnSection({
 						</span>
 					</span>
 				</button>
+				{canRunBacklogCleanup ? (
+					<Button
+						icon={<Sparkles size={14} />}
+						variant="ghost"
+						size="sm"
+						onClick={onRunBacklogCleanup}
+						disabled={column.cards.length === 0}
+						aria-label="Clean up backlog with board agent"
+						title={
+							column.cards.length > 0 ? "Review and clean up backlog with the board agent" : "Backlog is empty"
+						}
+						style={{ marginRight: 4 }}
+					/>
+				) : null}
 				{canStartAllTasks ? (
 					<Button
 						icon={<Play size={14} />}
@@ -194,7 +211,7 @@ function ColumnSection({
 												isCommitLoading={commitTaskLoadingById?.[card.id] ?? false}
 												isOpenPrLoading={openPrTaskLoadingById?.[card.id] ?? false}
 												isMoveToTrashLoading={moveToTrashLoadingById?.[card.id] ?? false}
-											workspacePath={workspacePath}
+												workspacePath={workspacePath}
 												onClick={() => {
 													if (column.id === "backlog") {
 														onEditTask?.(card);
@@ -210,9 +227,7 @@ function ColumnSection({
 								})()}
 								{provided.placeholder}
 								{column.cards.length === 0 ? (
-									<div className="flex items-center justify-center py-4 text-text-tertiary text-xs">
-										Empty
-									</div>
+									<div className="flex items-center justify-center py-4 text-text-tertiary text-xs">Empty</div>
 								) : null}
 							</div>
 						);
@@ -232,6 +247,7 @@ export function ColumnContextPanel({
 	onCreateTask,
 	onStartTask,
 	onStartAllTasks,
+	onRunBacklogCleanup,
 	onClearTrash,
 	editingTaskId,
 	inlineTaskEditor,
@@ -252,6 +268,7 @@ export function ColumnContextPanel({
 	onCreateTask?: () => void;
 	onStartTask?: (taskId: string) => void;
 	onStartAllTasks?: () => void;
+	onRunBacklogCleanup?: () => void;
 	onClearTrash?: () => void;
 	editingTaskId?: string | null;
 	inlineTaskEditor?: ReactNode;
@@ -339,6 +356,7 @@ export function ColumnContextPanel({
 							onCreateTask={column.id === "backlog" ? onCreateTask : undefined}
 							onStartTask={column.id === "backlog" ? onStartTask : undefined}
 							onStartAllTasks={column.id === "backlog" ? onStartAllTasks : undefined}
+							onRunBacklogCleanup={column.id === "backlog" ? onRunBacklogCleanup : undefined}
 							onClearTrash={column.id === "trash" ? onClearTrash : undefined}
 							editingTaskId={column.id === "backlog" ? editingTaskId : null}
 							inlineTaskEditor={column.id === "backlog" ? inlineTaskEditor : undefined}

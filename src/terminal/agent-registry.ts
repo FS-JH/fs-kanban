@@ -1,13 +1,6 @@
 import type { RuntimeConfigState } from "../config/runtime-config.js";
-import {
-	getRuntimeLaunchSupportedAgentCatalog,
-	RUNTIME_AGENT_CATALOG,
-} from "../core/agent-catalog.js";
-import type {
-	RuntimeAgentDefinition,
-	RuntimeAgentId,
-	RuntimeConfigResponse,
-} from "../core/api-contract.js";
+import { getRuntimeLaunchSupportedAgentCatalog, RUNTIME_AGENT_CATALOG } from "../core/agent-catalog.js";
+import type { RuntimeAgentDefinition, RuntimeAgentId, RuntimeConfigResponse } from "../core/api-contract.js";
 import { isBinaryAvailableOnPath, resolveBinaryLocation } from "./command-discovery.js";
 
 export interface ResolvedAgentCommand {
@@ -104,9 +97,7 @@ export function resolveAgentCommand(
 	return null;
 }
 
-export function buildRuntimeConfigResponse(
-	runtimeConfig: RuntimeConfigState,
-): RuntimeConfigResponse {
+export function buildRuntimeConfigResponse(runtimeConfig: RuntimeConfigState): RuntimeConfigResponse {
 	const detectedCommands = detectInstalledCommands();
 	const agents = getCuratedDefinitions(runtimeConfig, detectedCommands);
 	const resolved = resolveAgentCommand(runtimeConfig);
@@ -117,6 +108,8 @@ export function buildRuntimeConfigResponse(
 		fallbackAgentId: runtimeConfig.fallbackAgentId,
 		selectedShortcutLabel: runtimeConfig.selectedShortcutLabel,
 		agentAutonomousModeEnabled: runtimeConfig.agentAutonomousModeEnabled,
+		agentAttentionNotificationsEnabled: runtimeConfig.agentAttentionNotificationsEnabled,
+		agentAttentionSoundEnabled: runtimeConfig.agentAttentionSoundEnabled,
 		debugModeEnabled: isRuntimeDebugModeEnabled(),
 		effectiveCommand,
 		globalConfigPath: runtimeConfig.globalConfigPath,

@@ -19,8 +19,8 @@ import { useRuntimeWorkspaceChanges } from "@/runtime/use-runtime-workspace-chan
 import { useTaskWorkspaceStateVersionValue } from "@/stores/workspace-metadata-store";
 import { TERMINAL_THEME_COLORS } from "@/terminal/theme-colors";
 import { type BoardCard, type CardSelection, getTaskAutoReviewCancelButtonLabel } from "@/types";
-import { getTaskRetryAgentOptions } from "@/utils/task-agent-preferences";
 import { useUnmount, useWindowEvent } from "@/utils/react-use";
+import { getTaskRetryAgentOptions } from "@/utils/task-agent-preferences";
 
 // We still poll the open detail diff because line content can change without changing
 // the overall file or line counts that drive the shared workspace metadata stream.
@@ -190,6 +190,7 @@ export function CardDetailView({
 	onCreateTask,
 	onStartTask,
 	onStartAllTasks,
+	onRunBacklogCleanup,
 	onClearTrash,
 	editingTaskId,
 	inlineTaskEditor,
@@ -239,6 +240,7 @@ export function CardDetailView({
 	onCreateTask?: () => void;
 	onStartTask?: (taskId: string) => void;
 	onStartAllTasks?: () => void;
+	onRunBacklogCleanup?: () => void;
 	onClearTrash?: () => void;
 	editingTaskId?: string | null;
 	inlineTaskEditor?: ReactNode;
@@ -514,6 +516,7 @@ export function CardDetailView({
 					onCreateTask={onCreateTask}
 					onStartTask={onStartTask}
 					onStartAllTasks={onStartAllTasks}
+					onRunBacklogCleanup={onRunBacklogCleanup}
 					onClearTrash={onClearTrash}
 					editingTaskId={editingTaskId}
 					inlineTaskEditor={inlineTaskEditor}
@@ -543,7 +546,12 @@ export function CardDetailView({
 					<>
 						<div ref={mainRowRef} style={{ display: "flex", flex: "1 1 0", minHeight: 0, overflow: "hidden" }}>
 							<div
-								style={{ display: isDiffExpanded ? "none" : "flex", width: agentPanelPercent, minWidth: 0, minHeight: 0 }}
+								style={{
+									display: isDiffExpanded ? "none" : "flex",
+									width: agentPanelPercent,
+									minWidth: 0,
+									minHeight: 0,
+								}}
 							>
 								<AgentTerminalPanel
 									taskId={selection.card.id}
@@ -618,13 +626,13 @@ export function CardDetailView({
 								}}
 							>
 								{isRuntimeAvailable ? (
-								<DiffToolbar
-									mode={diffMode}
-									onModeChange={setDiffMode}
-									isExpanded={isDiffExpanded}
-									onToggleExpand={handleToggleDiffExpand}
-								/>
-							) : null}
+									<DiffToolbar
+										mode={diffMode}
+										onModeChange={setDiffMode}
+										isExpanded={isDiffExpanded}
+										onToggleExpand={handleToggleDiffExpand}
+									/>
+								) : null}
 								<div style={{ display: "flex", flex: "1 1 0", minHeight: 0 }}>
 									{isWorkspaceChangesPending ? (
 										<WorkspaceChangesLoadingPanel panelFlex={fileTreePanelFlex} />
