@@ -58,6 +58,7 @@ function createRuntimeConfigState(): RuntimeConfigState {
 		selectedAgentId: "codex",
 		fallbackAgentId: null,
 		selectedShortcutLabel: null,
+		agentApprovalMode: "full_auto",
 		agentAutonomousModeEnabled: true,
 		agentAttentionNotificationsEnabled: true,
 		agentAttentionSoundEnabled: false,
@@ -137,6 +138,8 @@ describe("createRuntimeApi runtime behavior", () => {
 		});
 		expect(terminalManager.startTaskSession).toHaveBeenCalledWith(
 			expect.objectContaining({
+				approvalMode: "full_auto",
+				autonomousModeEnabled: true,
 				cwd: "/tmp/existing-worktree",
 			}),
 		);

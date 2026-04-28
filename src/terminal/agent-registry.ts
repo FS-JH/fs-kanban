@@ -107,6 +107,7 @@ export function buildRuntimeConfigResponse(runtimeConfig: RuntimeConfigState): R
 		selectedAgentId: runtimeConfig.selectedAgentId,
 		fallbackAgentId: runtimeConfig.fallbackAgentId,
 		selectedShortcutLabel: runtimeConfig.selectedShortcutLabel,
+		agentApprovalMode: runtimeConfig.agentApprovalMode,
 		agentAutonomousModeEnabled: runtimeConfig.agentAutonomousModeEnabled,
 		agentAttentionNotificationsEnabled: runtimeConfig.agentAttentionNotificationsEnabled,
 		agentAttentionSoundEnabled: runtimeConfig.agentAttentionSoundEnabled,

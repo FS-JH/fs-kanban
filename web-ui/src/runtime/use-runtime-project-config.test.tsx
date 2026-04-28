@@ -29,6 +29,7 @@ function createRuntimeConfigResponse(
 		selectedAgentId,
 		fallbackAgentId: null,
 		selectedShortcutLabel: shortcuts[0]?.label ?? null,
+		agentApprovalMode: "full_auto",
 		agentAutonomousModeEnabled: true,
 		effectiveCommand: selectedAgentId,
 		globalConfigPath: "/tmp/global-config.json",
@@ -182,14 +183,14 @@ describe("useRuntimeProjectConfig", () => {
 				/>,
 			);
 			await Promise.resolve();
-			});
-
-			expect(fetchRuntimeConfigMock).toHaveBeenCalledWith(null);
-			if (latestSnapshot === null) {
-				throw new Error("Expected a runtime project config snapshot.");
-			}
-			const snapshot = latestSnapshot as HookSnapshot;
-			expect(snapshot.config?.selectedAgentId).toBe("codex");
-			expect(snapshot.isLoading).toBe(false);
 		});
+
+		expect(fetchRuntimeConfigMock).toHaveBeenCalledWith(null);
+		if (latestSnapshot === null) {
+			throw new Error("Expected a runtime project config snapshot.");
+		}
+		const snapshot = latestSnapshot as HookSnapshot;
+		expect(snapshot.config?.selectedAgentId).toBe("codex");
+		expect(snapshot.isLoading).toBe(false);
 	});
+});

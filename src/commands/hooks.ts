@@ -226,18 +226,17 @@ function extractToolInput(payload: Record<string, unknown>): Record<string, unkn
 	return outputArgs;
 }
 
-function describeToolOperation(toolName: string | null, toolInput: Record<string, unknown> | null): string | null {
-	if (!toolName || !toolInput) {
+function summarizeToolInput(toolInput: Record<string, unknown> | null): string | null {
+	if (!toolInput) {
 		return null;
 	}
-
 	const command =
 		readStringField(toolInput, "command") ??
 		readStringField(toolInput, "cmd") ??
 		readStringField(toolInput, "query") ??
 		readStringField(toolInput, "description");
 	if (command) {
-		return `${toolName}: ${truncateText(command, 120)}`;
+		return truncateText(command, 120);
 	}
 
 	const filePath =
@@ -245,7 +244,20 @@ function describeToolOperation(toolName: string | null, toolInput: Record<string
 		readStringField(toolInput, "filePath") ??
 		readStringField(toolInput, "path");
 	if (filePath) {
-		return `${toolName}: ${truncateText(filePath, 120)}`;
+		return truncateText(filePath, 120);
+	}
+
+	return null;
+}
+
+function describeToolOperation(toolName: string | null, toolInput: Record<string, unknown> | null): string | null {
+	if (!toolName) {
+		return null;
+	}
+
+	const inputSummary = summarizeToolInput(toolInput);
+	if (inputSummary) {
+		return `${toolName}: ${inputSummary}`;
 	}
 
 	return toolName;
@@ -369,6 +381,8 @@ function normalizeHookMetadata(
 			readNestedString(payload, ["taskComplete", "taskMetadata", "result"]) ??
 			readNestedString(payload, ["taskComplete", "result"]))
 		: null;
+	const toolInputSummary =
+		flagMetadata.toolInputSummary ?? summarizeToolInput(payload ? extractToolInput(payload) : null);
 
 	const inferredSource = inferHookSourceFromPayload(payload);
 
@@ -377,10 +391,9 @@ function normalizeHookMetadata(
 		source: flagMetadata.source ?? inferredSource ?? null,
 		hookEventName: flagMetadata.hookEventName ?? hookEventName ?? null,
 		toolName: flagMetadata.toolName ?? toolName ?? null,
+		toolInputSummary: toolInputSummary ?? null,
 		notificationType: flagMetadata.notificationType ?? notificationType ?? null,
-		finalMessage:
-			flagMetadata.finalMessage ??
-			(finalMessage ? normalizeWhitespace(finalMessage) : null),
+		finalMessage: flagMetadata.finalMessage ?? (finalMessage ? normalizeWhitespace(finalMessage) : null),
 		activityText:
 			flagMetadata.activityText ??
 			(activityText ? truncateText(normalizeWhitespace(activityText), MAX_ACTIVITY_TEXT_LENGTH) : null),
@@ -399,6 +412,9 @@ function normalizeHookMetadata(
 	}
 	if (typeof merged.toolName === "string") {
 		merged.toolName = truncateText(merged.toolName, 120);
+	}
+	if (typeof merged.toolInputSummary === "string") {
+		merged.toolInputSummary = truncateText(merged.toolInputSummary, 160);
 	}
 	if (typeof merged.notificationType === "string") {
 		merged.notificationType = truncateText(merged.notificationType, 120);
@@ -577,6 +593,15 @@ function extractCodexCommandSnippet(message: CodexEventPayload, line: string): s
 	return null;
 }
 
+function extractCodexToolName(message: CodexEventPayload): string | null {
+	const item = asRecord(message.item);
+	return (
+		readStringField(item ?? {}, "name") ??
+		readStringField(item ?? {}, "tool_name") ??
+		readStringField(item ?? {}, "toolName")
+	);
+}
+
 function pickFirstString(values: unknown[]): string {
 	for (const value of values) {
 		if (typeof value === "string" && value.trim()) {
@@ -649,6 +674,7 @@ export function parseCodexEventLine(
 		return null;
 	}
 	const command = extractCodexCommandSnippet(message, line);
+	const toolName = extractCodexToolName(message);
 	const messageText = typeof message.message === "string" ? normalizeWhitespace(message.message) : "";
 	const lastAgentMessage =
 		typeof message.last_agent_message === "string" ? normalizeWhitespace(message.last_agent_message) : "";
@@ -689,6 +715,8 @@ export function parseCodexEventLine(
 				metadata: {
 					source: "codex",
 					hookEventName: type,
+					toolName: name,
+					toolInputSummary: command || undefined,
 					activityText: command
 						? `Calling ${name}: ${truncateText(command, 120)}`
 						: `Calling ${truncateText(name, 48)}`,
@@ -756,6 +784,9 @@ export function parseCodexEventLine(
 					source: "codex",
 					activityText: "Waiting for approval",
 					hookEventName: type,
+					notificationType: "permission_prompt",
+					toolName: toolName || undefined,
+					toolInputSummary: command || undefined,
 				},
 			};
 		}
@@ -772,6 +803,8 @@ export function parseCodexEventLine(
 					source: "codex",
 					activityText: command ? `Running command: ${truncateText(command, 120)}` : "Running command",
 					hookEventName: type,
+					toolName: toolName || undefined,
+					toolInputSummary: command || undefined,
 				},
 			};
 		}
@@ -795,6 +828,8 @@ export function parseCodexEventLine(
 			metadata: {
 				source: "codex",
 				hookEventName: type,
+				toolName: toolName || undefined,
+				toolInputSummary: command || undefined,
 				activityText: failed
 					? command
 						? `Command failed: ${truncateText(command, 120)}`
@@ -820,6 +855,8 @@ export function parseCodexEventLine(
 			event: "activity",
 			metadata: {
 				source: "codex",
+				toolName: toolName || undefined,
+				toolInputSummary: command || undefined,
 				activityText: command
 					? `Codex ${type}: ${truncateText(command, 120)}`
 					: `Codex activity: ${truncateText(type, 64)}`,
@@ -974,10 +1011,14 @@ async function runCodexWrapperSubcommand(wrapperArgs: CodexWrapperArgs): Promise
 		}
 	}
 
-	const child = spawn(wrapperArgs.realBinary, buildCodexWrapperChildArgs(wrapperArgs.agentArgs, shouldWatchSessionLog), {
-		stdio: "inherit",
-		env: childEnv,
-	});
+	const child = spawn(
+		wrapperArgs.realBinary,
+		buildCodexWrapperChildArgs(wrapperArgs.agentArgs, shouldWatchSessionLog),
+		{
+			stdio: "inherit",
+			env: childEnv,
+		},
+	);
 
 	const forwardSignal = (signal: NodeJS.Signals) => {
 		if (!child.killed) {

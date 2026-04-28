@@ -84,7 +84,9 @@ describe("prepareAgentLaunch", () => {
 		const appendPromptIndex = launch.args.indexOf("--append-system-prompt");
 		expect(appendPromptIndex).toBeGreaterThanOrEqual(0);
 		expect(launch.args[appendPromptIndex + 1]).toContain("Kanban sidebar agent");
-		expect(launch.args[appendPromptIndex + 1]).toContain("'/usr/local/bin/node' '/Users/example/repo/dist/cli.js' task create");
+		expect(launch.args[appendPromptIndex + 1]).toContain(
+			"'/usr/local/bin/node' '/Users/example/repo/dist/cli.js' task create",
+		);
 	});
 
 	it("appends Kanban sidebar instructions for home Codex sessions", async () => {
@@ -103,7 +105,9 @@ describe("prepareAgentLaunch", () => {
 		expect(configArgIndex).toBeGreaterThanOrEqual(0);
 		expect(launch.args[configArgIndex + 1]).toContain("developer_instructions=");
 		expect(launch.args[configArgIndex + 1]).toContain("Kanban sidebar agent");
-		expect(launch.args[configArgIndex + 1]).toContain("'/usr/local/bin/node' '/Users/example/repo/dist/cli.js' task create");
+		expect(launch.args[configArgIndex + 1]).toContain(
+			"'/usr/local/bin/node' '/Users/example/repo/dist/cli.js' task create",
+		);
 	});
 
 	it("writes Claude settings with explicit permission and tool hooks", async () => {
@@ -251,5 +255,31 @@ describe("prepareAgentLaunch", () => {
 			prompt: "",
 		});
 		expect(codexLaunch.args).toContain("--dangerously-bypass-approvals-and-sandbox");
+	});
+
+	it("keeps supervised approval mode off the dangerous bypass flags", async () => {
+		setupTempHome();
+
+		const claudeLaunch = await prepareAgentLaunch({
+			taskId: "task-claude-supervised",
+			agentId: "claude",
+			binary: "claude",
+			args: [],
+			approvalMode: "supervised",
+			cwd: "/tmp",
+			prompt: "",
+		});
+		expect(claudeLaunch.args).not.toContain("--dangerously-skip-permissions");
+
+		const codexLaunch = await prepareAgentLaunch({
+			taskId: "task-codex-supervised",
+			agentId: "codex",
+			binary: "codex",
+			args: [],
+			approvalMode: "supervised",
+			cwd: "/tmp",
+			prompt: "",
+		});
+		expect(codexLaunch.args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
 	});
 });

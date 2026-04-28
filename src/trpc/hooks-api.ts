@@ -6,6 +6,7 @@ import type {
 } from "../core/api-contract.js";
 import { parseHookIngestRequest } from "../core/api-validation.js";
 import { loadWorkspaceContextById } from "../state/workspace-state.js";
+import { isPermissionPromptActivity } from "../terminal/agent-approval-policy.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
 import { captureTaskTurnCheckpoint, deleteTaskTurnCheckpointRef } from "../workspace/turn-checkpoints.js";
 import type { RuntimeTrpcContext } from "./app-router.js";
@@ -32,9 +33,7 @@ function canTransitionTaskForHookEvent(summary: RuntimeTaskSessionSummary, event
 	}
 	return (
 		summary.state === "awaiting_review" &&
-		(summary.reviewReason === "attention" ||
-			summary.reviewReason === "hook" ||
-			summary.reviewReason === "error")
+		(summary.reviewReason === "attention" || summary.reviewReason === "hook" || summary.reviewReason === "error")
 	);
 }
 
@@ -71,6 +70,7 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 				if (!canTransitionTaskForHookEvent(summary, event)) {
 					if (body.metadata) {
 						manager.applyHookActivity(taskId, body.metadata);
+						manager.maybeAutoApprovePendingPrompt(taskId);
 					}
 					return {
 						ok: true,
@@ -113,9 +113,12 @@ export function createHooksApi(deps: CreateHooksApiDependencies): RuntimeTrpcCon
 				if (body.metadata) {
 					manager.applyHookActivity(taskId, body.metadata);
 				}
+				if (event === "to_review" && body.metadata) {
+					manager.maybeAutoApprovePendingPrompt(taskId);
+				}
 
 				void deps.broadcastRuntimeWorkspaceStateUpdated(workspaceId, workspacePath);
-				if (event === "to_review") {
+				if (event === "to_review" && !isPermissionPromptActivity(body.metadata)) {
 					deps.broadcastTaskReadyForReview(workspaceId, taskId);
 				}
 

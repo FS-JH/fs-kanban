@@ -2,14 +2,16 @@
 // It owns process lifecycle, terminal protocol filtering, and summary updates
 // for command-driven agents such as Claude Code, Codex, Gemini, and shell sessions.
 import type {
-	RuntimeTaskHookActivity,
+	RuntimeAgentApprovalMode,
 	RuntimeTaskAttachment,
+	RuntimeTaskHookActivity,
 	RuntimeTaskImage,
 	RuntimeTaskSessionReviewReason,
 	RuntimeTaskSessionState,
 	RuntimeTaskSessionSummary,
 	RuntimeTaskTurnCheckpoint,
 } from "../core/api-contract.js";
+import { buildHookActivityFingerprint, evaluateSupervisedApproval } from "./agent-approval-policy.js";
 import {
 	type AgentAdapterLaunchInput,
 	type AgentOutputTransitionDetector,
@@ -37,6 +39,7 @@ const MAX_WORKSPACE_TRUST_BUFFER_CHARS = 16_384;
 const AUTO_RESTART_WINDOW_MS = 5_000;
 const MAX_AUTO_RESTARTS_PER_WINDOW = 3;
 const REPLAY_HISTORY_FLUSH_MS = 1_000;
+const SUPERVISED_APPROVAL_DELAY_MS = 300;
 // OpenCode can query OSC 11 before the browser terminal is attached and ready to answer.
 // We intercept that startup probe during history replay and early PTY output, synthesize a
 // background-color reply, then disable the filter once a live terminal listener has attached.
@@ -56,8 +59,11 @@ interface ActiveProcessState {
 	detectOutputTransition: AgentOutputTransitionDetector | null;
 	shouldInspectOutputForTransition: AgentOutputTransitionInspectionPredicate | null;
 	awaitingCodexPromptAfterEnter: boolean;
+	approvalMode: RuntimeAgentApprovalMode;
 	autoConfirmedWorkspaceTrust: boolean;
 	workspaceTrustConfirmTimer: NodeJS.Timeout | null;
+	supervisedApprovalTimer: NodeJS.Timeout | null;
+	lastSupervisedApprovalFingerprint: string | null;
 }
 
 interface SessionEntry {
@@ -77,6 +83,7 @@ export interface StartTaskSessionRequest {
 	agentId: AgentAdapterLaunchInput["agentId"];
 	binary: string;
 	args: string[];
+	approvalMode?: RuntimeAgentApprovalMode;
 	autonomousModeEnabled?: boolean;
 	cwd: string;
 	prompt: string;
@@ -204,6 +211,16 @@ function buildTerminalEnvironment(
 	};
 }
 
+function stopPendingSupervisedApproval(active: ActiveProcessState, resetFingerprint = true): void {
+	if (active.supervisedApprovalTimer) {
+		clearTimeout(active.supervisedApprovalTimer);
+		active.supervisedApprovalTimer = null;
+	}
+	if (resetFingerprint) {
+		active.lastSupervisedApprovalFingerprint = null;
+	}
+}
+
 export class TerminalSessionManager implements TerminalSessionService {
 	private readonly entries = new Map<string, SessionEntry>();
 	private readonly summaryListeners = new Set<(summary: RuntimeTaskSessionSummary) => void>();
@@ -304,6 +321,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 		}
 
 		if (entry.active) {
+			stopPendingSupervisedApproval(entry.active);
 			stopWorkspaceTrustTimers(entry.active);
 			entry.active.session.stop();
 			entry.active = null;
@@ -319,6 +337,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			agentId: request.agentId,
 			binary: request.binary,
 			args: request.args,
+			approvalMode: request.approvalMode,
 			autonomousModeEnabled: request.autonomousModeEnabled,
 			cwd: request.cwd,
 			prompt: request.prompt,
@@ -424,6 +443,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 					if (!currentActive) {
 						return;
 					}
+					stopPendingSupervisedApproval(currentActive);
 					stopWorkspaceTrustTimers(currentActive);
 
 					const summary = this.applySessionEvent(currentEntry, {
@@ -498,8 +518,11 @@ export class TerminalSessionManager implements TerminalSessionService {
 			detectOutputTransition: launch.detectOutputTransition ?? null,
 			shouldInspectOutputForTransition: launch.shouldInspectOutputForTransition ?? null,
 			awaitingCodexPromptAfterEnter: false,
+			approvalMode: request.approvalMode ?? (request.autonomousModeEnabled ? "full_auto" : "manual"),
 			autoConfirmedWorkspaceTrust: false,
 			workspaceTrustConfirmTimer: null,
+			supervisedApprovalTimer: null,
+			lastSupervisedApprovalFingerprint: null,
 		};
 		entry.active = active;
 
@@ -535,6 +558,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 		}
 
 		if (entry.active) {
+			stopPendingSupervisedApproval(entry.active);
 			stopWorkspaceTrustTimers(entry.active);
 			entry.active.session.stop();
 			entry.active = null;
@@ -591,6 +615,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 					if (!currentActive) {
 						return;
 					}
+					stopPendingSupervisedApproval(currentActive);
 					stopWorkspaceTrustTimers(currentActive);
 
 					const summary = updateSummary(currentEntry, {
@@ -643,8 +668,11 @@ export class TerminalSessionManager implements TerminalSessionService {
 			detectOutputTransition: null,
 			shouldInspectOutputForTransition: null,
 			awaitingCodexPromptAfterEnter: false,
+			approvalMode: "manual",
 			autoConfirmedWorkspaceTrust: false,
 			workspaceTrustConfirmTimer: null,
+			supervisedApprovalTimer: null,
+			lastSupervisedApprovalFingerprint: null,
 		};
 		entry.active = active;
 
@@ -692,6 +720,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 		if (!entry?.active) {
 			return null;
 		}
+		stopPendingSupervisedApproval(entry.active);
 		if (
 			entry.summary.agentId === "codex" &&
 			entry.summary.state === "awaiting_review" &&
@@ -760,6 +789,52 @@ export class TerminalSessionManager implements TerminalSessionService {
 			this.emitSummary(summary);
 		}
 		return cloneSummary(summary);
+	}
+
+	maybeAutoApprovePendingPrompt(taskId: string): boolean {
+		const entry = this.entries.get(taskId);
+		if (!entry?.active) {
+			return false;
+		}
+		if (entry.active.approvalMode !== "supervised" || entry.summary.state !== "awaiting_review") {
+			stopPendingSupervisedApproval(entry.active);
+			return false;
+		}
+
+		const decision = evaluateSupervisedApproval(entry.summary.latestHookActivity);
+		if (!decision.shouldAutoApprove) {
+			stopPendingSupervisedApproval(entry.active);
+			return false;
+		}
+
+		const fingerprint = buildHookActivityFingerprint(entry.summary.latestHookActivity);
+		if (
+			entry.active.supervisedApprovalTimer !== null &&
+			entry.active.lastSupervisedApprovalFingerprint === fingerprint
+		) {
+			return true;
+		}
+
+		stopPendingSupervisedApproval(entry.active, false);
+		entry.active.lastSupervisedApprovalFingerprint = fingerprint;
+		const timer = setTimeout(() => {
+			const currentActive = this.entries.get(taskId)?.active;
+			const currentSummary = this.entries.get(taskId)?.summary;
+			if (
+				!currentActive ||
+				!currentSummary ||
+				currentActive.approvalMode !== "supervised" ||
+				currentSummary.state !== "awaiting_review" ||
+				currentActive.lastSupervisedApprovalFingerprint !== fingerprint
+			) {
+				return;
+			}
+			currentActive.session.write("\r");
+			currentActive.supervisedApprovalTimer = null;
+		}, SUPERVISED_APPROVAL_DELAY_MS);
+		timer.unref?.();
+		entry.active.supervisedApprovalTimer = timer;
+		return true;
 	}
 
 	applyHookActivity(taskId: string, activity: Partial<RuntimeTaskHookActivity>): RuntimeTaskSessionSummary | null {
@@ -873,6 +948,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 		entry.suppressAutoRestartOnExit = true;
 		const cleanupFn = entry.active.onSessionCleanup;
 		entry.active.onSessionCleanup = null;
+		stopPendingSupervisedApproval(entry.active);
 		stopWorkspaceTrustTimers(entry.active);
 		entry.active.session.stop();
 		if (cleanupFn) {
@@ -889,6 +965,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			if (!entry.active) {
 				continue;
 			}
+			stopPendingSupervisedApproval(entry.active);
 			stopWorkspaceTrustTimers(entry.active);
 			entry.active.session.stop({ interrupted: true });
 		}
@@ -905,8 +982,13 @@ export class TerminalSessionManager implements TerminalSessionService {
 				entry.active.workspaceTrustBuffer = "";
 			}
 		}
-		if (entry.active && transition.changed && transition.patch.state === "awaiting_review") {
-			entry.active.awaitingCodexPromptAfterEnter = false;
+		if (entry.active && transition.changed) {
+			if (transition.patch.state === "awaiting_review") {
+				entry.active.awaitingCodexPromptAfterEnter = false;
+			}
+			if (transition.patch.state === "awaiting_review" || transition.patch.state === "running") {
+				stopPendingSupervisedApproval(entry.active);
+			}
 		}
 		return updateSummary(entry, transition.patch);
 	}

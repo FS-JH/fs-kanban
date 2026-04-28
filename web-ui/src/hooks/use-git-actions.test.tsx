@@ -80,6 +80,7 @@ function createRuntimeConfig(selectedAgentId: RuntimeConfigResponse["selectedAge
 		selectedAgentId,
 		fallbackAgentId: null,
 		selectedShortcutLabel: null,
+		agentApprovalMode: "full_auto",
 		agentAutonomousModeEnabled: true,
 		effectiveCommand: null,
 		globalConfigPath: "/tmp/global-config.json",
@@ -205,12 +206,10 @@ describe("useGitActions", () => {
 			await vi.advanceTimersByTimeAsync(250);
 		});
 
-		expect(sendTaskSessionInput).toHaveBeenNthCalledWith(
-			1,
-			"task-1",
-			expect.any(String),
-			{ appendNewline: false, mode: "paste" },
-		);
+		expect(sendTaskSessionInput).toHaveBeenNthCalledWith(1, "task-1", expect.any(String), {
+			appendNewline: false,
+			mode: "paste",
+		});
 		expect(sendTaskSessionInput).toHaveBeenNthCalledWith(2, "task-1", "\r", { appendNewline: false });
 		expect(showAppToastMock).not.toHaveBeenCalled();
 	});

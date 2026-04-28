@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract.js";
 import { buildShellCommandLine } from "../../../src/core/shell.js";
@@ -23,6 +23,10 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 }
 
 describe("TerminalSessionManager", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it("clears trust prompt state when transitioning to review", () => {
 		const manager = new TerminalSessionManager();
 		const entry = {
@@ -290,5 +294,124 @@ describe("TerminalSessionManager", () => {
 
 		expect(onOutput).toHaveBeenCalledTimes(1);
 		expect((onOutput.mock.calls[0]?.[0] as Buffer).toString("utf8")).toBe("previous output");
+	});
+
+	it("auto-approves supervised read-only permission prompts", () => {
+		vi.useFakeTimers();
+		const manager = new TerminalSessionManager();
+		const writeSpy = vi.fn();
+		(
+			manager as unknown as {
+				entries: Map<
+					string,
+					{
+						summary: RuntimeTaskSessionSummary;
+						active: {
+							session: { write: (input: string) => void };
+							approvalMode: "supervised";
+							supervisedApprovalTimer: NodeJS.Timeout | null;
+							lastSupervisedApprovalFingerprint: string | null;
+						};
+						replayOutputHistory: Buffer[];
+						listenerIdCounter: number;
+						listeners: Map<number, unknown>;
+						restartRequest: null;
+						suppressAutoRestartOnExit: boolean;
+						autoRestartTimestamps: number[];
+						pendingAutoRestart: null;
+					}
+				>;
+			}
+		).entries.set("task-1", {
+			summary: createSummary({
+				state: "awaiting_review",
+				reviewReason: "hook",
+				latestHookActivity: {
+					activityText: "Waiting for approval",
+					toolName: "Read",
+					toolInputSummary: "src/index.ts",
+					finalMessage: null,
+					hookEventName: "approval_request",
+					notificationType: "permission_prompt",
+					source: "codex",
+				},
+			}),
+			active: {
+				session: { write: writeSpy },
+				approvalMode: "supervised",
+				supervisedApprovalTimer: null,
+				lastSupervisedApprovalFingerprint: null,
+			},
+			replayOutputHistory: [],
+			listenerIdCounter: 1,
+			listeners: new Map(),
+			restartRequest: null,
+			suppressAutoRestartOnExit: false,
+			autoRestartTimestamps: [],
+			pendingAutoRestart: null,
+		});
+
+		expect(manager.maybeAutoApprovePendingPrompt("task-1")).toBe(true);
+		vi.advanceTimersByTime(300);
+
+		expect(writeSpy).toHaveBeenCalledWith("\r");
+	});
+
+	it("does not auto-approve unsafe supervised permission prompts", () => {
+		const manager = new TerminalSessionManager();
+		const writeSpy = vi.fn();
+		(
+			manager as unknown as {
+				entries: Map<
+					string,
+					{
+						summary: RuntimeTaskSessionSummary;
+						active: {
+							session: { write: (input: string) => void };
+							approvalMode: "supervised";
+							supervisedApprovalTimer: NodeJS.Timeout | null;
+							lastSupervisedApprovalFingerprint: string | null;
+						};
+						replayOutputHistory: Buffer[];
+						listenerIdCounter: number;
+						listeners: Map<number, unknown>;
+						restartRequest: null;
+						suppressAutoRestartOnExit: boolean;
+						autoRestartTimestamps: number[];
+						pendingAutoRestart: null;
+					}
+				>;
+			}
+		).entries.set("task-1", {
+			summary: createSummary({
+				state: "awaiting_review",
+				reviewReason: "hook",
+				latestHookActivity: {
+					activityText: "Waiting for approval",
+					toolName: "Bash",
+					toolInputSummary: "rm -rf dist",
+					finalMessage: null,
+					hookEventName: "approval_request",
+					notificationType: "permission_prompt",
+					source: "codex",
+				},
+			}),
+			active: {
+				session: { write: writeSpy },
+				approvalMode: "supervised",
+				supervisedApprovalTimer: null,
+				lastSupervisedApprovalFingerprint: null,
+			},
+			replayOutputHistory: [],
+			listenerIdCounter: 1,
+			listeners: new Map(),
+			restartRequest: null,
+			suppressAutoRestartOnExit: false,
+			autoRestartTimestamps: [],
+			pendingAutoRestart: null,
+		});
+
+		expect(manager.maybeAutoApprovePendingPrompt("task-1")).toBe(false);
+		expect(writeSpy).not.toHaveBeenCalled();
 	});
 });

@@ -3,6 +3,7 @@
 // on state orchestration instead of transport plumbing.
 import { getRuntimeTrpcClient } from "@/runtime/trpc-client";
 import type {
+	RuntimeAgentApprovalMode,
 	RuntimeAgentId,
 	RuntimeConfigResponse,
 	RuntimeDebugResetAllStateResponse,
@@ -20,6 +21,7 @@ export async function saveRuntimeConfig(
 		selectedAgentId?: RuntimeAgentId;
 		fallbackAgentId?: RuntimeAgentId | null;
 		selectedShortcutLabel?: string | null;
+		agentApprovalMode?: RuntimeAgentApprovalMode;
 		agentAutonomousModeEnabled?: boolean;
 		agentAttentionNotificationsEnabled?: boolean;
 		agentAttentionSoundEnabled?: boolean;
