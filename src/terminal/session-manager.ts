@@ -38,6 +38,17 @@ import type { TerminalSessionListener, TerminalSessionService } from "./terminal
 const MAX_WORKSPACE_TRUST_BUFFER_CHARS = 16_384;
 const AUTO_RESTART_WINDOW_MS = 5_000;
 const MAX_AUTO_RESTARTS_PER_WINDOW = 3;
+
+// When KANBAN_DISABLE_AUTO_RESTART=1 is set, fs-kanban will NOT auto-respawn an
+// agent terminal after its process exits. This is the right default for
+// headless / pm2-managed deployments where an external SIGKILL or a real
+// process crash should not silently relaunch the agent (which can burn tokens
+// and obscure the failure). Interactive single-user installs leave it unset and
+// keep the existing self-healing behavior.
+const AUTO_RESTART_DISABLED = (() => {
+	const raw = process.env.KANBAN_DISABLE_AUTO_RESTART?.trim().toLowerCase();
+	return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+})();
 const REPLAY_HISTORY_FLUSH_MS = 1_000;
 const SUPERVISED_APPROVAL_DELAY_MS = 300;
 // OpenCode can query OSC 11 before the browser terminal is attached and ready to answer.
@@ -1047,9 +1058,15 @@ export class TerminalSessionManager implements TerminalSessionService {
 	}
 
 	private shouldAutoRestart(entry: SessionEntry): boolean {
+		// Honor explicit suppression (e.g. UI "Stop session") even when auto-restart
+		// is globally disabled — we still want to drop the timestamp on exit so the
+		// next manual start has a clean slate.
 		const wasSuppressed = entry.suppressAutoRestartOnExit;
 		entry.suppressAutoRestartOnExit = false;
 		if (wasSuppressed) {
+			return false;
+		}
+		if (AUTO_RESTART_DISABLED) {
 			return false;
 		}
 		if (entry.listeners.size === 0 || entry.restartRequest?.kind !== "task") {

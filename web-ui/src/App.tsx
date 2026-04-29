@@ -689,6 +689,7 @@ export default function App(): ReactElement {
 		fetchTaskWorkspaceInfo,
 		sendTaskSessionInput,
 		readyForReviewNotificationsEnabled,
+		runtimeConfig: runtimeProjectConfig ?? null,
 		taskGitActionLoadingByTaskId,
 		runAutoReviewGitAction,
 	});

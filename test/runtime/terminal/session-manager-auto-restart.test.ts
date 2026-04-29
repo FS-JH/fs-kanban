@@ -113,4 +113,59 @@ describe("TerminalSessionManager auto-restart", () => {
 		expect(manager.getSummary("task-1")?.state).toBe("awaiting_review");
 		expect(manager.getSummary("task-1")?.pid).toBeNull();
 	});
+
+	it("does not restart an attached agent session when KANBAN_DISABLE_AUTO_RESTART=1", async () => {
+		// AUTO_RESTART_DISABLED is captured at module load, so reset modules and
+		// re-import with the env var set. vi.hoisted mocks re-bind automatically.
+		const previousValue = process.env.KANBAN_DISABLE_AUTO_RESTART;
+		process.env.KANBAN_DISABLE_AUTO_RESTART = "1";
+		vi.resetModules();
+		try {
+			const { TerminalSessionManager: TerminalSessionManagerWithDisableFlag } = await import(
+				"../../../src/terminal/session-manager.js"
+			);
+
+			const spawnedSessions: Array<ReturnType<typeof createMockPtySession>> = [];
+			ptySessionSpawnMock.mockImplementation((request: MockSpawnRequest) => {
+				const session = createMockPtySession(spawnedSessions.length === 0 ? 111 : 222, request);
+				spawnedSessions.push(session);
+				return session;
+			});
+
+			const manager = new TerminalSessionManagerWithDisableFlag();
+			manager.attach("task-1", {
+				onState: vi.fn(),
+				onOutput: vi.fn(),
+				onExit: vi.fn(),
+			});
+
+			await manager.startTaskSession({
+				taskId: "task-1",
+				agentId: "codex",
+				binary: "codex",
+				args: [],
+				cwd: "/tmp/task-1",
+				prompt: "Fix the bug",
+			});
+
+			expect(ptySessionSpawnMock).toHaveBeenCalledTimes(1);
+
+			// Simulate an external SIGKILL (no stopTaskSession was called).
+			spawnedSessions[0]?.triggerExit(137);
+			await Promise.resolve();
+			await Promise.resolve();
+			await Promise.resolve();
+
+			// With the disable flag set, the auto-restart MUST NOT fire.
+			expect(ptySessionSpawnMock).toHaveBeenCalledTimes(1);
+			expect(manager.getSummary("task-1")?.pid).toBeNull();
+		} finally {
+			if (previousValue === undefined) {
+				delete process.env.KANBAN_DISABLE_AUTO_RESTART;
+			} else {
+				process.env.KANBAN_DISABLE_AUTO_RESTART = previousValue;
+			}
+			vi.resetModules();
+		}
+	});
 });

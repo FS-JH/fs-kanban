@@ -726,6 +726,11 @@ export const runtimeConfigResponseSchema = z.object({
 	agentAttentionNotificationsEnabled: z.boolean().optional(),
 	agentAttentionSoundEnabled: z.boolean().optional(),
 	debugModeEnabled: z.boolean().optional(),
+	// When true, the frontend will not auto-move tasks to trash when their
+	// session transitions to "interrupted". Driven by the
+	// KANBAN_DISABLE_TRASH_ON_INTERRUPT env var on the runtime server.
+	// Optional for forward-compat with older clients/servers.
+	trashOnInterruptDisabled: z.boolean().optional(),
 	effectiveCommand: z.string().nullable(),
 	globalConfigPath: z.string(),
 	projectConfigPath: z.string().nullable(),

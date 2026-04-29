@@ -43,6 +43,16 @@ function isRuntimeDebugModeEnabled(): boolean {
 	return parseBooleanEnvValue(debugModeValue);
 }
 
+// When KANBAN_DISABLE_TRASH_ON_INTERRUPT=1 is set, the frontend will NOT
+// auto-move a task to the trash column when its session transitions to
+// "interrupted". The card stays in its current column with state="interrupted"
+// so the user can resume in place via the existing "Start" flow. Designed for
+// headless / pm2-managed deployments where pm2 restarts and external kills
+// would otherwise evict in-progress work.
+function isTrashOnInterruptDisabled(): boolean {
+	return parseBooleanEnvValue(process.env.KANBAN_DISABLE_TRASH_ON_INTERRUPT);
+}
+
 export function detectInstalledCommands(): string[] {
 	const candidates = [...RUNTIME_AGENT_CATALOG.map((entry) => entry.binary), "npx"];
 	const detected: string[] = [];
@@ -112,6 +122,7 @@ export function buildRuntimeConfigResponse(runtimeConfig: RuntimeConfigState): R
 		agentAttentionNotificationsEnabled: runtimeConfig.agentAttentionNotificationsEnabled,
 		agentAttentionSoundEnabled: runtimeConfig.agentAttentionSoundEnabled,
 		debugModeEnabled: isRuntimeDebugModeEnabled(),
+		trashOnInterruptDisabled: isTrashOnInterruptDisabled(),
 		effectiveCommand,
 		globalConfigPath: runtimeConfig.globalConfigPath,
 		projectConfigPath: runtimeConfig.projectConfigPath,

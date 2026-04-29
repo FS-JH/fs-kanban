@@ -90,6 +90,7 @@ function HookHarness({
 	startTaskSession,
 	selectedCard = null,
 	onSnapshot,
+	runtimeConfig = null,
 }: {
 	board: BoardData;
 	setBoard: Dispatch<SetStateAction<BoardData>>;
@@ -97,6 +98,7 @@ function HookHarness({
 	startTaskSession: UseTaskSessionsResult["startTaskSession"];
 	selectedCard?: { card: BoardCard; column: { id: "backlog" | "in_progress" | "review" | "trash" } } | null;
 	onSnapshot?: (snapshot: HookSnapshot) => void;
+	runtimeConfig?: Parameters<typeof useBoardInteractions>[0]["runtimeConfig"];
 }): null {
 	const [sessions, setSessions] = useState<Record<string, RuntimeTaskSessionSummary>>({});
 	const [, setSelectedTaskId] = useState<string | null>(null);
@@ -121,6 +123,7 @@ function HookHarness({
 		fetchTaskWorkspaceInfo: NOOP_FETCH_WORKSPACE_INFO,
 		sendTaskSessionInput: NOOP_SEND_TASK_INPUT,
 		readyForReviewNotificationsEnabled: false,
+		runtimeConfig,
 		taskGitActionLoadingByTaskId: {},
 		runAutoReviewGitAction: NOOP_RUN_AUTO_REVIEW,
 	});

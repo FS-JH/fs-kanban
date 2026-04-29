@@ -7,7 +7,12 @@ import { useLinkedBacklogTaskActions } from "@/hooks/use-linked-backlog-task-act
 import { useProgrammaticCardMoves } from "@/hooks/use-programmatic-card-moves";
 import { useReviewAutoActions } from "@/hooks/use-review-auto-actions";
 import type { UseTaskSessionsResult } from "@/hooks/use-task-sessions";
-import type { RuntimeAgentId, RuntimeTaskSessionSummary, RuntimeTaskWorkspaceInfoResponse } from "@/runtime/types";
+import type {
+	RuntimeAgentId,
+	RuntimeConfigResponse,
+	RuntimeTaskSessionSummary,
+	RuntimeTaskWorkspaceInfoResponse,
+} from "@/runtime/types";
 import {
 	applyDragResult,
 	clearColumnTasks,
@@ -67,6 +72,12 @@ interface UseBoardInteractionsInput {
 		options?: SendTerminalInputOptions,
 	) => Promise<{ ok: boolean; message?: string }>;
 	readyForReviewNotificationsEnabled: boolean;
+	// When the runtime config has trashOnInterruptDisabled=true (env var
+	// KANBAN_DISABLE_TRASH_ON_INTERRUPT on the server), interrupted sessions
+	// stay in their current column instead of auto-moving to trash. Designed
+	// for server/headless deployments where pm2 restarts and external kills
+	// shouldn't evict in-progress work.
+	runtimeConfig: RuntimeConfigResponse | null;
 	taskGitActionLoadingByTaskId: Record<string, TaskGitActionLoadingStateLike>;
 	runAutoReviewGitAction: (taskId: string, action: TaskGitAction) => Promise<boolean>;
 }
@@ -112,9 +123,11 @@ export function useBoardInteractions({
 	fetchTaskWorkspaceInfo,
 	sendTaskSessionInput,
 	readyForReviewNotificationsEnabled,
+	runtimeConfig,
 	taskGitActionLoadingByTaskId,
 	runAutoReviewGitAction,
 }: UseBoardInteractionsInput): UseBoardInteractionsResult {
+	const trashOnInterruptDisabled = runtimeConfig?.trashOnInterruptDisabled === true;
 	const previousSessionsRef = useRef<Record<string, RuntimeTaskSessionSummary>>({});
 	const notificationPermissionPromptInFlightRef = useRef(false);
 	const moveToTrashLoadingByIdRef = useRef<Record<string, true>>({});
@@ -469,6 +482,7 @@ export function useBoardInteractions({
 					continue;
 				}
 				if (
+					!trashOnInterruptDisabled &&
 					summary.state === "interrupted" &&
 					previous?.state !== "interrupted" &&
 					columnId &&
@@ -508,7 +522,14 @@ export function useBoardInteractions({
 			previousSessionsRef.current = nextPreviousSessions;
 			return nextBoard;
 		});
-	}, [programmaticCardMoveCycle, sessions, setBoard, setSelectedTaskId, tryProgrammaticCardMove]);
+	}, [
+		programmaticCardMoveCycle,
+		sessions,
+		setBoard,
+		setSelectedTaskId,
+		trashOnInterruptDisabled,
+		tryProgrammaticCardMove,
+	]);
 
 	const { confirmMoveTaskToTrash, handleCreateDependency, handleDeleteDependency, requestMoveTaskToTrash } =
 		useLinkedBacklogTaskActions({
