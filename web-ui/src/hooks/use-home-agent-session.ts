@@ -208,7 +208,11 @@ export function useHomeAgentSession({
 		if (startedSessionKeysRef.current.has(sessionKey)) {
 			return;
 		}
-		if (sessionSummaries[session.taskId]) {
+		const existingSummary = sessionSummaries[session.taskId];
+		if (
+			existingSummary &&
+			(existingSummary.state === "running" || existingSummary.state === "awaiting_review")
+		) {
 			startedSessionKeysRef.current.add(sessionKey);
 			return;
 		}
