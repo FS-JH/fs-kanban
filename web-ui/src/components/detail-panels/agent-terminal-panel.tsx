@@ -401,11 +401,13 @@ function AgentTerminalPanelLayout({
 							{retryAgentOptions.map((option) => (
 								<Button
 									key={option.id}
-									variant={option.reason === "fallback" ? "primary" : "default"}
+									variant={
+										option.reason === "fallback" || option.reason === "resume" ? "primary" : "default"
+									}
 									fill
 									onClick={() => onRetryWithAgent(option.id)}
 								>
-									{`Retry with ${option.label}`}
+									{option.reason === "resume" ? `Resume with ${option.label}` : `Retry with ${option.label}`}
 								</Button>
 							))}
 						</div>
