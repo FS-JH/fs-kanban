@@ -4,13 +4,49 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { prepareAgentLaunch } from "../../../src/terminal/agent-session-adapters.js";
+import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract.js";
+import { prepareAgentLaunch, type AgentAdapterLaunchInput } from "../../../src/terminal/agent-session-adapters.js";
 
 const originalHome = process.env.HOME;
 let tempHome: string | null = null;
 const originalArgv = [...process.argv];
 const originalExecArgv = [...process.execArgv];
 const originalExecPath = process.execPath;
+
+const baseLaunch: AgentAdapterLaunchInput = {
+	taskId: "task-1",
+	agentId: "codex",
+	binary: "/usr/bin/false",
+	args: [],
+	cwd: "/tmp",
+	prompt: "",
+};
+
+function makeLaunchInput(overrides: Partial<AgentAdapterLaunchInput> = {}): AgentAdapterLaunchInput {
+	return { ...baseLaunch, ...overrides };
+}
+
+function makeSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
+	return {
+		taskId: "task-1",
+		state: "running",
+		mode: null,
+		agentId: "codex",
+		workspacePath: "/tmp",
+		pid: 1,
+		startedAt: Date.now(),
+		updatedAt: Date.now(),
+		lastOutputAt: Date.now(),
+		reviewReason: null,
+		exitCode: null,
+		lastHookAt: null,
+		latestHookActivity: null,
+		warningMessage: null,
+		latestTurnCheckpoint: null,
+		previousTurnCheckpoint: null,
+		...overrides,
+	};
+}
 
 function setupTempHome(): string {
 	tempHome = mkdtempSync(join(tmpdir(), "kanban-agent-adapters-"));
@@ -46,6 +82,55 @@ afterEach(() => {
 });
 
 describe("prepareAgentLaunch", () => {
+	it("codex detector emits agent.needs-input when prompt returns while running", async () => {
+		const launch = await prepareAgentLaunch(makeLaunchInput({ agentId: "codex" }));
+		const detect = launch.detectOutputTransition;
+		expect(detect).toBeDefined();
+		if (!detect) {
+			throw new Error("Expected Codex output transition detector");
+		}
+		const ev = detect("\n› ", makeSummary({ agentId: "codex", state: "running" }));
+		expect(ev).toEqual({ type: "agent.needs-input" });
+	});
+
+	it("codex detector still emits agent.prompt-ready when returning from awaiting_review/attention", async () => {
+		const launch = await prepareAgentLaunch(makeLaunchInput({ agentId: "codex" }));
+		const detect = launch.detectOutputTransition;
+		if (!detect) {
+			throw new Error("Expected Codex output transition detector");
+		}
+		const ev = detect(
+			"\n› ",
+			makeSummary({ agentId: "codex", state: "awaiting_review", reviewReason: "attention" }),
+		);
+		expect(ev).toEqual({ type: "agent.prompt-ready" });
+	});
+
+	it("claude detector emits agent.needs-input when prompt returns while running", async () => {
+		const launch = await prepareAgentLaunch(makeLaunchInput({ agentId: "claude" }));
+		const detect = launch.detectOutputTransition;
+		expect(detect).toBeDefined();
+		if (!detect) {
+			throw new Error("Expected Claude output transition detector");
+		}
+		const data = "\n╭──╮\n│ > │\n╰──╯\n";
+		const ev = detect(data, makeSummary({ agentId: "claude", state: "running" }));
+		expect(ev).toEqual({ type: "agent.needs-input" });
+	});
+
+	it("claude detector emits agent.prompt-ready when returning from awaiting_review/attention", async () => {
+		const launch = await prepareAgentLaunch(makeLaunchInput({ agentId: "claude" }));
+		const detect = launch.detectOutputTransition;
+		if (!detect) {
+			throw new Error("Expected Claude output transition detector");
+		}
+		const ev = detect(
+			"\n╭──╮\n│ > │\n╰──╯\n",
+			makeSummary({ agentId: "claude", state: "awaiting_review", reviewReason: "attention" }),
+		);
+		expect(ev).toEqual({ type: "agent.prompt-ready" });
+	});
+
 	it("routes codex through the hooks codex-wrapper command", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({

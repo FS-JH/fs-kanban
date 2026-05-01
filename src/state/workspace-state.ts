@@ -188,6 +188,21 @@ export function getRuntimeHomePath(): string {
 	return join(homedir(), RUNTIME_HOME_PARENT_DIR, RUNTIME_HOME_DIR);
 }
 
+const JOURNALS_DIR = "journals";
+const AUDIT_DIR = "audit";
+
+export function getJournalsHomePath(): string {
+	return join(getRuntimeHomePath(), JOURNALS_DIR);
+}
+
+export function getWorkspaceJournalDir(workspaceId: string): string {
+	return join(getJournalsHomePath(), workspaceId);
+}
+
+export function getAuditHomePath(): string {
+	return join(getRuntimeHomePath(), AUDIT_DIR);
+}
+
 export function getTaskWorktreesHomePath(): string {
 	return join(homedir(), RUNTIME_HOME_PARENT_DIR, RUNTIME_WORKTREES_DIR);
 }

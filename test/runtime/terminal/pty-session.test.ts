@@ -153,6 +153,33 @@ describe("PtySession", () => {
 		expect(ptyMocks.spawn.mock.calls[0]?.[0]).toBe("codex");
 	});
 
+	it("forwards output chunks to the output sink", async () => {
+		setPlatform("darwin");
+		const ptyProcess = createMockPtyProcess();
+		ptyMocks.spawn.mockReturnValue(ptyProcess);
+		const outputSink = vi.fn();
+		const receivedChunk = new Promise<Buffer>((resolve) => {
+			PtySession.spawn({
+				binary: "/bin/echo",
+				args: ["hi"],
+				cwd: "/tmp",
+				cols: 120,
+				rows: 40,
+				outputSink,
+				onData: resolve,
+			});
+		});
+
+		ptyProcess.emitData(Buffer.from("hi\n", "utf8"));
+		const chunk = await receivedChunk;
+
+		expect(chunk.toString("utf8")).toContain("hi");
+		expect(outputSink).toHaveBeenCalledTimes(1);
+		const sinkChunk = outputSink.mock.calls[0]?.[0] as Buffer;
+		expect(Buffer.isBuffer(sinkChunk)).toBe(true);
+		expect(sinkChunk.toString("utf8")).toContain("hi");
+	});
+
 	it("does not wrap cmd itself on Windows", () => {
 		setPlatform("win32");
 		process.env.ComSpec = "C:\\Windows\\System32\\cmd.exe";

@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import type {
 	RuntimeBoardData,
 	RuntimeProjectAddResponse,
@@ -5,7 +6,9 @@ import type {
 	RuntimeProjectTaskCounts,
 } from "../core/api-contract.js";
 import { parseProjectAddRequest, parseProjectRemoveRequest } from "../core/api-validation.js";
+
 import {
+	getWorkspaceJournalDir,
 	listWorkspaceIndexEntries,
 	loadWorkspaceContext,
 	loadWorkspaceContextById,
@@ -14,8 +17,8 @@ import {
 	removeWorkspaceStateFiles,
 } from "../state/workspace-state.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
-import { deleteTaskWorktree } from "../workspace/task-worktree.js";
 import { ensureInitialCommit, initializeGitRepository } from "../workspace/initialize-repo.js";
+import { deleteTaskWorktree } from "../workspace/task-worktree.js";
 import type { RuntimeTrpcContext } from "./app-router.js";
 
 interface DisposeWorkspaceOptions {
@@ -76,8 +79,7 @@ export function createProjectsApi(deps: CreateProjectsApiDependencies): RuntimeT
 							ok: false,
 							project: null,
 							requiresGitInitialization: true,
-							error:
-								"This folder is not a git repository. FS Kanban requires git to manage worktrees. Initialize git to continue.",
+							error: "This folder is not a git repository. FS Kanban requires git to manage worktrees. Initialize git to continue.",
 						} satisfies RuntimeProjectAddResponse;
 					}
 					const initResult = await initializeGitRepository(projectPath);
@@ -197,6 +199,8 @@ export function createProjectsApi(deps: CreateProjectsApiDependencies): RuntimeT
 						}
 					})();
 				}
+				// Project removal is permanent: drop the workspace's journal directory.
+				void rm(getWorkspaceJournalDir(body.projectId), { recursive: true, force: true }).catch(() => undefined);
 				return {
 					ok: true,
 				};

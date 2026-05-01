@@ -3,6 +3,7 @@
 // for command-driven agents such as Claude Code, Codex, Gemini, and shell sessions.
 import type {
 	RuntimeAgentApprovalMode,
+	RuntimeApprovalRequest,
 	RuntimeTaskAttachment,
 	RuntimeTaskHookActivity,
 	RuntimeTaskImage,
@@ -11,7 +12,12 @@ import type {
 	RuntimeTaskSessionSummary,
 	RuntimeTaskTurnCheckpoint,
 } from "../core/api-contract.js";
-import { buildHookActivityFingerprint, evaluateSupervisedApproval } from "./agent-approval-policy.js";
+import {
+	APPROVE_KEYSTROKES,
+	buildHookActivityFingerprint,
+	evaluateSupervisedApproval,
+	isPermissionPromptActivity,
+} from "./agent-approval-policy.js";
 import {
 	type AgentAdapterLaunchInput,
 	type AgentOutputTransitionDetector,
@@ -25,8 +31,10 @@ import {
 	WORKSPACE_TRUST_CONFIRM_DELAY_MS,
 } from "./claude-workspace-trust.js";
 import { hasCodexWorkspaceTrustPrompt, shouldAutoConfirmCodexWorkspaceTrust } from "./codex-workspace-trust.js";
-import { PtySession } from "./pty-session.js";
+import { OutputJournal } from "./output-journal.js";
+import { MAX_HISTORY_BYTES, PtySession } from "./pty-session.js";
 import { reduceSessionTransition, type SessionTransitionEvent } from "./session-state-machine.js";
+import type { SupervisorApprovalQueue } from "./supervisor-approval-queue.js";
 import {
 	createTerminalProtocolFilterState,
 	disableOsc11BackgroundQueryIntercept,
@@ -80,6 +88,7 @@ interface ActiveProcessState {
 interface SessionEntry {
 	summary: RuntimeTaskSessionSummary;
 	active: ActiveProcessState | null;
+	workspaceId: string | null;
 	replayOutputHistory: Buffer[];
 	listenerIdCounter: number;
 	listeners: Map<number, TerminalSessionListener>;
@@ -116,6 +125,11 @@ export interface StartShellSessionRequest {
 	binary: string;
 	args?: string[];
 	env?: Record<string, string | undefined>;
+}
+
+export interface TerminalSessionManagerOptions {
+	workspaceJournalDir?: string;
+	approvalQueue?: SupervisorApprovalQueue;
 }
 
 function now(): number {
@@ -159,6 +173,25 @@ function normalizeStaleSessionSummary(summary: RuntimeTaskSessionSummary): Runti
 		pid: null,
 		updatedAt: now(),
 	};
+}
+
+function trimReplayOutputHistory(history: Buffer[]): Buffer[] {
+	let remainingBytes = MAX_HISTORY_BYTES;
+	const trimmed: Buffer[] = [];
+	for (let index = history.length - 1; index >= 0 && remainingBytes > 0; index -= 1) {
+		const chunk = history[index];
+		if (!chunk) {
+			continue;
+		}
+		if (chunk.byteLength <= remainingBytes) {
+			trimmed.unshift(chunk);
+			remainingBytes -= chunk.byteLength;
+			continue;
+		}
+		trimmed.unshift(Buffer.from(chunk.subarray(chunk.byteLength - remainingBytes)));
+		remainingBytes = 0;
+	}
+	return trimmed;
 }
 
 function updateSummary(entry: SessionEntry, patch: Partial<RuntimeTaskSessionSummary>): RuntimeTaskSessionSummary {
@@ -237,6 +270,14 @@ export class TerminalSessionManager implements TerminalSessionService {
 	private readonly summaryListeners = new Set<(summary: RuntimeTaskSessionSummary) => void>();
 	private readonly replayHistoryListeners = new Set<(taskId: string, history: readonly Buffer[]) => void>();
 	private readonly replayHistoryFlushTimers = new Map<string, NodeJS.Timeout>();
+	private readonly workspaceJournalDir?: string;
+	private readonly journalsByTaskId = new Map<string, OutputJournal>();
+	private readonly approvalQueue?: SupervisorApprovalQueue;
+
+	constructor(options: TerminalSessionManagerOptions = {}) {
+		this.workspaceJournalDir = options.workspaceJournalDir;
+		this.approvalQueue = options.approvalQueue;
+	}
 
 	onSummary(listener: (summary: RuntimeTaskSessionSummary) => void): () => void {
 		this.summaryListeners.add(listener);
@@ -255,12 +296,15 @@ export class TerminalSessionManager implements TerminalSessionService {
 	hydrateFromRecord(
 		record: Record<string, RuntimeTaskSessionSummary>,
 		replayHistoryByTaskId: Record<string, readonly Buffer[]> = {},
+		workspaceId: string | null = null,
 	): void {
 		for (const [taskId, summary] of Object.entries(record)) {
+			const replayOutputHistory = (replayHistoryByTaskId[taskId] ?? []).map((chunk) => Buffer.from(chunk));
 			this.entries.set(taskId, {
 				summary: normalizeStaleSessionSummary(summary),
 				active: null,
-				replayOutputHistory: (replayHistoryByTaskId[taskId] ?? []).map((chunk) => Buffer.from(chunk)),
+				workspaceId,
+				replayOutputHistory: trimReplayOutputHistory(replayOutputHistory),
 				listenerIdCounter: 1,
 				listeners: new Map(),
 				restartRequest: null,
@@ -268,12 +312,20 @@ export class TerminalSessionManager implements TerminalSessionService {
 				autoRestartTimestamps: [],
 				pendingAutoRestart: null,
 			});
+			// After a runtime restart, no PTY is active for any hydrated task. Any
+			// pending approval replayed from the audit log against a now-dead session
+			// must be cancelled so the Supervisor panel does not show ghost requests.
+			this.approvalQueue?.cancelPendingForTask(workspaceId, taskId);
 		}
 	}
 
 	getSummary(taskId: string): RuntimeTaskSessionSummary | null {
 		const entry = this.entries.get(taskId);
 		return entry ? cloneSummary(entry.summary) : null;
+	}
+
+	getWorkspaceId(taskId: string): string | null {
+		return this.entries.get(taskId)?.workspaceId ?? null;
 	}
 
 	listSummaries(): RuntimeTaskSessionSummary[] {
@@ -323,6 +375,9 @@ export class TerminalSessionManager implements TerminalSessionService {
 
 	async startTaskSession(request: StartTaskSessionRequest): Promise<RuntimeTaskSessionSummary> {
 		const entry = this.ensureEntry(request.taskId);
+		if (request.workspaceId !== undefined) {
+			entry.workspaceId = request.workspaceId;
+		}
 		entry.restartRequest = {
 			kind: "task",
 			request: cloneStartTaskSessionRequest(request),
@@ -370,6 +425,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			part.toLowerCase().includes("codex"),
 		);
 		let session: PtySession;
+		const journal = this.createOutputJournal(request.taskId);
 		try {
 			session = PtySession.spawn({
 				binary: commandBinary,
@@ -378,6 +434,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 				env,
 				cols,
 				rows,
+				...(journal ? { outputSink: journal.append.bind(journal) } : {}),
 				onData: (chunk) => {
 					if (!entry.active) {
 						return;
@@ -445,49 +502,55 @@ export class TerminalSessionManager implements TerminalSessionService {
 					}
 					this.scheduleReplayHistoryFlush(request.taskId);
 				},
-				onExit: (event) => {
-					const currentEntry = this.entries.get(request.taskId);
-					if (!currentEntry) {
-						return;
-					}
-					const currentActive = currentEntry.active;
-					if (!currentActive) {
-						return;
-					}
-					stopPendingSupervisedApproval(currentActive);
-					stopWorkspaceTrustTimers(currentActive);
+				onExit: async (event) => {
+					try {
+						const currentEntry = this.entries.get(request.taskId);
+						if (!currentEntry) {
+							return;
+						}
+						const currentActive = currentEntry.active;
+						if (!currentActive) {
+							return;
+						}
+						stopPendingSupervisedApproval(currentActive);
+						stopWorkspaceTrustTimers(currentActive);
+						this.approvalQueue?.cancelPendingForTask(currentEntry.workspaceId, request.taskId);
 
-					const summary = this.applySessionEvent(currentEntry, {
-						type: "process.exit",
-						exitCode: event.exitCode,
-						interrupted: currentActive.session.wasInterrupted(),
-					});
-					const shouldAutoRestart = this.shouldAutoRestart(currentEntry);
-
-					for (const taskListener of currentEntry.listeners.values()) {
-						taskListener.onState?.(cloneSummary(summary));
-						taskListener.onExit?.(event.exitCode);
-					}
-					currentEntry.replayOutputHistory = currentActive.session
-						.getOutputHistory()
-						.map((chunk) => Buffer.from(chunk));
-					currentEntry.active = null;
-					this.flushReplayHistory(request.taskId);
-					this.emitSummary(summary);
-					if (shouldAutoRestart) {
-						this.scheduleAutoRestart(currentEntry);
-					}
-
-					const cleanupFn = currentActive.onSessionCleanup;
-					currentActive.onSessionCleanup = null;
-					if (cleanupFn) {
-						cleanupFn().catch(() => {
-							// Best effort: cleanup failure is non-critical.
+						const summary = this.applySessionEvent(currentEntry, {
+							type: "process.exit",
+							exitCode: event.exitCode,
+							interrupted: currentActive.session.wasInterrupted(),
 						});
+						const shouldAutoRestart = this.shouldAutoRestart(currentEntry);
+
+						for (const taskListener of currentEntry.listeners.values()) {
+							taskListener.onState?.(cloneSummary(summary));
+							taskListener.onExit?.(event.exitCode);
+						}
+						currentEntry.replayOutputHistory = currentActive.session
+							.getOutputHistory()
+							.map((chunk) => Buffer.from(chunk));
+						currentEntry.active = null;
+						this.flushReplayHistory(request.taskId);
+						this.emitSummary(summary);
+						if (shouldAutoRestart) {
+							this.scheduleAutoRestart(currentEntry);
+						}
+
+						const cleanupFn = currentActive.onSessionCleanup;
+						currentActive.onSessionCleanup = null;
+						if (cleanupFn) {
+							cleanupFn().catch(() => {
+								// Best effort: cleanup failure is non-critical.
+							});
+						}
+					} finally {
+						await this.closeOutputJournal(request.taskId, journal);
 					}
 				},
 			});
 		} catch (error) {
+			await this.closeOutputJournal(request.taskId, journal);
 			if (launch.cleanup) {
 				void launch.cleanup().catch(() => {
 					// Best effort: cleanup failure is non-critical.
@@ -582,6 +645,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 		const env = buildTerminalEnvironment(request.env);
 
 		let session: PtySession;
+		const journal = this.createOutputJournal(request.taskId);
 		try {
 			session = PtySession.spawn({
 				binary: request.binary,
@@ -590,6 +654,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 				env,
 				cols,
 				rows,
+				...(journal ? { outputSink: journal.append.bind(journal) } : {}),
 				onData: (chunk) => {
 					if (!entry.active) {
 						return;
@@ -617,38 +682,43 @@ export class TerminalSessionManager implements TerminalSessionService {
 					}
 					this.scheduleReplayHistoryFlush(request.taskId);
 				},
-				onExit: (event) => {
-					const currentEntry = this.entries.get(request.taskId);
-					if (!currentEntry) {
-						return;
-					}
-					const currentActive = currentEntry.active;
-					if (!currentActive) {
-						return;
-					}
-					stopPendingSupervisedApproval(currentActive);
-					stopWorkspaceTrustTimers(currentActive);
+				onExit: async (event) => {
+					try {
+						const currentEntry = this.entries.get(request.taskId);
+						if (!currentEntry) {
+							return;
+						}
+						const currentActive = currentEntry.active;
+						if (!currentActive) {
+							return;
+						}
+						stopPendingSupervisedApproval(currentActive);
+						stopWorkspaceTrustTimers(currentActive);
 
-					const summary = updateSummary(currentEntry, {
-						state: currentActive.session.wasInterrupted() ? "interrupted" : "idle",
-						reviewReason: currentActive.session.wasInterrupted() ? "interrupted" : null,
-						exitCode: event.exitCode,
-						pid: null,
-					});
+						const summary = updateSummary(currentEntry, {
+							state: currentActive.session.wasInterrupted() ? "interrupted" : "idle",
+							reviewReason: currentActive.session.wasInterrupted() ? "interrupted" : null,
+							exitCode: event.exitCode,
+							pid: null,
+						});
 
-					for (const taskListener of currentEntry.listeners.values()) {
-						taskListener.onState?.(cloneSummary(summary));
-						taskListener.onExit?.(event.exitCode);
+						for (const taskListener of currentEntry.listeners.values()) {
+							taskListener.onState?.(cloneSummary(summary));
+							taskListener.onExit?.(event.exitCode);
+						}
+						currentEntry.replayOutputHistory = currentActive.session
+							.getOutputHistory()
+							.map((chunk) => Buffer.from(chunk));
+						currentEntry.active = null;
+						this.flushReplayHistory(request.taskId);
+						this.emitSummary(summary);
+					} finally {
+						await this.closeOutputJournal(request.taskId, journal);
 					}
-					currentEntry.replayOutputHistory = currentActive.session
-						.getOutputHistory()
-						.map((chunk) => Buffer.from(chunk));
-					currentEntry.active = null;
-					this.flushReplayHistory(request.taskId);
-					this.emitSummary(summary);
 				},
 			});
 		} catch (error) {
+			await this.closeOutputJournal(request.taskId, journal);
 			const summary = updateSummary(entry, {
 				state: "failed",
 				agentId: null,
@@ -732,6 +802,12 @@ export class TerminalSessionManager implements TerminalSessionService {
 			return null;
 		}
 		stopPendingSupervisedApproval(entry.active);
+		// User is interacting directly with the terminal — any pending approval
+		// queue entries for this task are now stale (the user is dismissing or
+		// answering the prompt themselves). Cancel them so the Supervisor panel
+		// does not retain a stale entry that could cause applyDecision to write
+		// keystrokes into a different prompt later.
+		this.approvalQueue?.cancelPendingForTask(entry.workspaceId, taskId);
 		if (
 			entry.summary.agentId === "codex" &&
 			entry.summary.state === "awaiting_review" &&
@@ -807,18 +883,43 @@ export class TerminalSessionManager implements TerminalSessionService {
 		if (!entry?.active) {
 			return false;
 		}
-		if (entry.active.approvalMode !== "supervised" || entry.summary.state !== "awaiting_review") {
+		if (entry.summary.state !== "awaiting_review" || !isPermissionPromptActivity(entry.summary.latestHookActivity)) {
 			stopPendingSupervisedApproval(entry.active);
 			return false;
 		}
 
-		const decision = evaluateSupervisedApproval(entry.summary.latestHookActivity);
+		const activity = entry.summary.latestHookActivity;
+		if (!activity) {
+			stopPendingSupervisedApproval(entry.active);
+			return false;
+		}
+
+		// Surface pending requests to the Supervisor panel when we have both a queue and
+		// the workspace context for the entry. Falls back to the legacy silent path
+		// otherwise (preserves backward-compat with tests that construct entries
+		// without workspaceId or queue).
+		const request =
+			this.approvalQueue && entry.workspaceId
+				? this.approvalQueue.enqueue({
+						taskId,
+						workspaceId: entry.workspaceId,
+						agentId: entry.summary.agentId,
+						activity,
+					})
+				: null;
+
+		if (entry.active.approvalMode !== "supervised") {
+			stopPendingSupervisedApproval(entry.active);
+			return false;
+		}
+
+		const decision = evaluateSupervisedApproval(activity);
 		if (!decision.shouldAutoApprove) {
 			stopPendingSupervisedApproval(entry.active);
 			return false;
 		}
 
-		const fingerprint = buildHookActivityFingerprint(entry.summary.latestHookActivity);
+		const fingerprint = buildHookActivityFingerprint(activity);
 		if (
 			entry.active.supervisedApprovalTimer !== null &&
 			entry.active.lastSupervisedApprovalFingerprint === fingerprint
@@ -829,8 +930,9 @@ export class TerminalSessionManager implements TerminalSessionService {
 		stopPendingSupervisedApproval(entry.active, false);
 		entry.active.lastSupervisedApprovalFingerprint = fingerprint;
 		const timer = setTimeout(() => {
-			const currentActive = this.entries.get(taskId)?.active;
-			const currentSummary = this.entries.get(taskId)?.summary;
+			const currentEntry = this.entries.get(taskId);
+			const currentActive = currentEntry?.active;
+			const currentSummary = currentEntry?.summary;
 			if (
 				!currentActive ||
 				!currentSummary ||
@@ -840,12 +942,50 @@ export class TerminalSessionManager implements TerminalSessionService {
 			) {
 				return;
 			}
-			currentActive.session.write("\r");
+			if (request && this.approvalQueue) {
+				this.approvalQueue.decide(request.id, "auto_approved", "policy");
+			}
+			currentActive.session.write(APPROVE_KEYSTROKES[currentSummary.agentId ?? "codex"]?.approve ?? "\r");
 			currentActive.supervisedApprovalTimer = null;
 		}, SUPERVISED_APPROVAL_DELAY_MS);
 		timer.unref?.();
 		entry.active.supervisedApprovalTimer = timer;
 		return true;
+	}
+
+	/**
+	 * Apply a user decision to an approval request. Called from the tRPC mutation.
+	 * Looks up the request via the queue, validates it belongs to a task with an
+	 * active session, decides the queue, and writes the corresponding keystroke
+	 * to the PTY. Returns the updated request, or null if the request cannot be
+	 * acted upon (not pending, no active session, etc.).
+	 */
+	applyDecision(requestId: string, decision: "approved" | "denied"): RuntimeApprovalRequest | null {
+		if (!this.approvalQueue) return null;
+		const request = this.approvalQueue.get(requestId);
+		if (!request) return null;
+		if (request.status !== "pending") return null;
+		const entry = this.entries.get(request.taskId);
+		if (!entry?.active) return null;
+		// Defense in depth: do NOT write keystrokes into a session that has moved
+		// past the prompt. The cancel-on-transition logic above should already
+		// remove these from the queue, but a stale tRPC mutation could race.
+		if (entry.summary.state !== "awaiting_review") return null;
+		if (!isPermissionPromptActivity(entry.summary.latestHookActivity)) return null;
+		const liveFingerprint = buildHookActivityFingerprint(entry.summary.latestHookActivity);
+		if (liveFingerprint !== request.fingerprint) return null;
+		const status = decision === "approved" ? "user_approved" : "user_denied";
+		const updated = this.approvalQueue.decide(requestId, status, "user");
+		if (!updated) return null;
+		const keystrokes = APPROVE_KEYSTROKES[entry.summary.agentId ?? "codex"] ?? APPROVE_KEYSTROKES.codex;
+		const key = decision === "approved" ? keystrokes.approve : keystrokes.deny;
+		stopPendingSupervisedApproval(entry.active, false);
+		try {
+			entry.active.session.write(key);
+		} catch {
+			// PTY write errors are surfaced via the session's existing error handling.
+		}
+		return updated;
 	}
 
 	applyHookActivity(taskId: string, activity: Partial<RuntimeTaskHookActivity>): RuntimeTaskSessionSummary | null {
@@ -961,6 +1101,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 		entry.active.onSessionCleanup = null;
 		stopPendingSupervisedApproval(entry.active);
 		stopWorkspaceTrustTimers(entry.active);
+		this.approvalQueue?.cancelPendingForTask(entry.workspaceId, taskId);
 		entry.active.session.stop();
 		if (cleanupFn) {
 			cleanupFn().catch(() => {
@@ -978,6 +1119,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 			}
 			stopPendingSupervisedApproval(entry.active);
 			stopWorkspaceTrustTimers(entry.active);
+			this.approvalQueue?.cancelPendingForTask(entry.workspaceId, entry.summary.taskId);
 			entry.active.session.stop({ interrupted: true });
 		}
 		return activeEntries.map((entry) => cloneSummary(entry.summary));
@@ -1001,6 +1143,14 @@ export class TerminalSessionManager implements TerminalSessionService {
 				stopPendingSupervisedApproval(entry.active);
 			}
 		}
+		// Transition out of awaiting_review (back to running, or process exit) means
+		// any prior pending approval is no longer actionable — cancel queue entries
+		// so applyDecision can't fire keystrokes into a different prompt.
+		const previousState = entry.summary.state;
+		const nextState = transition.patch.state ?? previousState;
+		if (previousState === "awaiting_review" && nextState !== "awaiting_review") {
+			this.approvalQueue?.cancelPendingForTask(entry.workspaceId, entry.summary.taskId);
+		}
 		return updateSummary(entry, transition.patch);
 	}
 
@@ -1012,6 +1162,7 @@ export class TerminalSessionManager implements TerminalSessionService {
 		const created: SessionEntry = {
 			summary: createDefaultSummary(taskId),
 			active: null,
+			workspaceId: null,
 			replayOutputHistory: [],
 			listenerIdCounter: 1,
 			listeners: new Map(),
@@ -1027,6 +1178,25 @@ export class TerminalSessionManager implements TerminalSessionService {
 	private getReplayHistorySnapshot(entry: SessionEntry): Buffer[] {
 		const source = entry.active?.session.getOutputHistory() ?? entry.replayOutputHistory;
 		return source.map((chunk) => Buffer.from(chunk));
+	}
+
+	private createOutputJournal(taskId: string): OutputJournal | null {
+		if (!this.workspaceJournalDir) {
+			return null;
+		}
+		const journal = new OutputJournal({ dir: this.workspaceJournalDir, taskId });
+		this.journalsByTaskId.set(taskId, journal);
+		return journal;
+	}
+
+	private async closeOutputJournal(taskId: string, journal: OutputJournal | null): Promise<void> {
+		if (!journal) {
+			return;
+		}
+		await journal.close().catch(() => {});
+		if (this.journalsByTaskId.get(taskId) === journal) {
+			this.journalsByTaskId.delete(taskId);
+		}
 	}
 
 	private scheduleReplayHistoryFlush(taskId: string): void {

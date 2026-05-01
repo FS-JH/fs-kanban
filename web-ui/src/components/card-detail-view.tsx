@@ -191,6 +191,7 @@ export function CardDetailView({
 	onStartTask,
 	onStartAllTasks,
 	onRunBacklogCleanup,
+	onRestartBoardAgent,
 	onClearTrash,
 	editingTaskId,
 	inlineTaskEditor,
@@ -242,6 +243,7 @@ export function CardDetailView({
 	onStartTask?: (taskId: string) => void;
 	onStartAllTasks?: () => void;
 	onRunBacklogCleanup?: () => void;
+	onRestartBoardAgent?: () => void;
 	onClearTrash?: () => void;
 	editingTaskId?: string | null;
 	inlineTaskEditor?: ReactNode;
@@ -520,6 +522,7 @@ export function CardDetailView({
 						onStartTask={onStartTask}
 						onStartAllTasks={onStartAllTasks}
 						onRunBacklogCleanup={onRunBacklogCleanup}
+						onRestartBoardAgent={onRestartBoardAgent}
 						onClearTrash={onClearTrash}
 						editingTaskId={editingTaskId}
 						inlineTaskEditor={inlineTaskEditor}

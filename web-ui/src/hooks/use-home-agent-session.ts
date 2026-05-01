@@ -2,7 +2,7 @@
 // It keeps one in-memory session identity stable per workspace while the app
 // stays open and rotates it only when the selected agent command changes.
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createHomeAgentSessionId, isHomeAgentSessionIdForWorkspace } from "@runtime-home-agent-session";
 
 import { notifyError } from "@/components/app-toaster";
@@ -30,6 +30,7 @@ interface UseHomeAgentSessionInput {
 
 interface UseHomeAgentSessionResult {
 	taskId: string | null;
+	restartSession: () => Promise<void>;
 }
 
 interface HomeAgentSessionIdentity {
@@ -274,7 +275,34 @@ export function useHomeAgentSession({
 		};
 	}, []);
 
+	const restartSession = useCallback(async (): Promise<void> => {
+		if (!currentProjectId || !descriptorTaskId) {
+			return;
+		}
+		const sessionKey = buildHomeAgentSessionKey({
+			workspaceId: currentProjectId,
+			taskId: descriptorTaskId,
+		});
+		// Stop the running session on the server. The auto-restart effect below
+		// will mint a fresh one because we clear the started-key marker and the
+		// stale summary so the start gate (line ~211) does not short-circuit.
+		await stopHomeAgentSession({
+			workspaceId: currentProjectId,
+			taskId: descriptorTaskId,
+		});
+		startedSessionKeysRef.current.delete(sessionKey);
+		setSessionSummaries((prev) => {
+			if (!prev[descriptorTaskId]) {
+				return prev;
+			}
+			const next = { ...prev };
+			delete next[descriptorTaskId];
+			return next;
+		});
+	}, [currentProjectId, descriptorTaskId, setSessionSummaries]);
+
 	return {
 		taskId: descriptor?.taskId ?? null,
+		restartSession,
 	};
 }

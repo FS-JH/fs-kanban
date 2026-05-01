@@ -10,6 +10,7 @@ import type {
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract.js";
 import {
+	getWorkspaceJournalDir,
 	listWorkspaceIndexEntries,
 	loadWorkspaceContext,
 	loadWorkspaceSessionReplayHistoryById,
@@ -19,7 +20,9 @@ import {
 	removeWorkspaceStateFiles,
 	saveWorkspaceTaskReplayHistoryById,
 } from "../state/workspace-state.js";
+import { OutputJournal } from "../terminal/output-journal.js";
 import { TerminalSessionManager } from "../terminal/session-manager.js";
+import type { SupervisorApprovalQueue } from "../terminal/supervisor-approval-queue.js";
 import { getGitSyncSummary, probeGitWorkspaceState } from "../workspace/git-sync.js";
 import { getTaskWorkspacePathInfo } from "../workspace/task-worktree.js";
 
@@ -34,6 +37,7 @@ export interface CreateWorkspaceRegistryDependencies {
 	loadRuntimeConfig: (cwd: string) => Promise<RuntimeConfigState>;
 	hasGitRepository: (path: string) => boolean;
 	pathIsDirectory: (path: string) => Promise<boolean>;
+	approvalQueue?: SupervisorApprovalQueue;
 	onTerminalManagerReady?: (workspaceId: string, manager: TerminalSessionManager) => void;
 }
 
@@ -300,11 +304,21 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			return loaded;
 		}
 		const loading = (async () => {
-			const manager = new TerminalSessionManager();
+			const manager = new TerminalSessionManager({
+				workspaceJournalDir: getWorkspaceJournalDir(workspaceId),
+				approvalQueue: deps.approvalQueue,
+			});
 			try {
 				const existingWorkspace = await loadWorkspaceStateById(workspaceId, repoPath);
-				const replayHistoryByTaskId = await loadWorkspaceSessionReplayHistoryById(workspaceId);
-				manager.hydrateFromRecord(existingWorkspace.sessions, replayHistoryByTaskId);
+				const legacyReplayHistoryByTaskId = await loadWorkspaceSessionReplayHistoryById(workspaceId);
+				const replayHistoryByTaskId: Record<string, readonly Buffer[]> = {};
+				const dir = getWorkspaceJournalDir(workspaceId);
+				for (const taskId of Object.keys(existingWorkspace.sessions)) {
+					const fromJournal = await OutputJournal.replay({ dir, taskId });
+					replayHistoryByTaskId[taskId] =
+						fromJournal.length > 0 ? fromJournal : (legacyReplayHistoryByTaskId[taskId] ?? []);
+				}
+				manager.hydrateFromRecord(existingWorkspace.sessions, replayHistoryByTaskId, workspaceId);
 			} catch {
 				// Workspace state will be created on demand.
 			}

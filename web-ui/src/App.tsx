@@ -17,6 +17,7 @@ import { ProjectNavigationPanel } from "@/components/project-navigation-panel";
 import { ResizableBottomPane } from "@/components/resizable-bottom-pane";
 import { RuntimeSettingsDialog, type RuntimeSettingsSection } from "@/components/runtime-settings-dialog";
 import { StartupOnboardingDialog } from "@/components/startup-onboarding-dialog";
+import { SupervisorPanel } from "@/components/supervisor-panel";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { TaskInlineCreateCard } from "@/components/task-inline-create-card";
 import { TopBar } from "@/components/top-bar";
@@ -30,6 +31,9 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
+	Dialog,
+	DialogBody,
+	DialogHeader,
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { createInitialBoardData } from "@/data/board-data";
@@ -60,6 +64,7 @@ import { useWorkspaceSync } from "@/hooks/use-workspace-sync";
 import { getTaskAgentNavbarHint, isTaskAgentSetupSatisfied } from "@/runtime/native-agent";
 import { getRuntimeTaskSessionStatus } from "@/runtime/task-session-status";
 import type { RuntimeAggregateBoardCard, RuntimeTaskSessionSummary } from "@/runtime/types";
+import { useApprovalQueue } from "@/runtime/use-approval-queue";
 import { useRuntimeProjectConfig } from "@/runtime/use-runtime-project-config";
 import { useTerminalConnectionReady } from "@/runtime/use-terminal-connection-ready";
 import { useWorkspacePersistence } from "@/runtime/use-workspace-persistence";
@@ -94,6 +99,7 @@ export default function App(): ReactElement {
 	const [canPersistWorkspaceState, setCanPersistWorkspaceState] = useState(false);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [settingsInitialSection, setSettingsInitialSection] = useState<RuntimeSettingsSection | null>(null);
+	const [isSupervisorPanelOpen, setIsSupervisorPanelOpen] = useState(false);
 	const [homeSidebarSection, setHomeSidebarSection] = useState<"projects" | "agent">("projects");
 	const [isClearTrashDialogOpen, setIsClearTrashDialogOpen] = useState(false);
 	const [isGitHistoryOpen, setIsGitHistoryOpen] = useState(false);
@@ -118,6 +124,8 @@ export default function App(): ReactElement {
 		workspaceState: streamedWorkspaceState,
 		workspaceMetadata,
 		latestTaskReadyForReview,
+		approvalQueueState,
+		dispatchSeedApprovals,
 		streamError,
 		isRuntimeDisconnected,
 		hasReceivedSnapshot,
@@ -137,6 +145,28 @@ export default function App(): ReactElement {
 	} = useProjectNavigation({
 		onProjectSwitchStart: handleProjectSwitchStart,
 	});
+	const {
+		pending: approvalQueuePending,
+		recent: approvalQueueRecent,
+		decide: decideApproval,
+	} = useApprovalQueue({
+		workspaceId: currentProjectId,
+		approvalQueueState,
+		dispatchSeedApprovals,
+	});
+	const handleOpenSupervisorPanel = useCallback(() => {
+		setIsSupervisorPanelOpen(true);
+	}, []);
+	const handleSupervisorDecision = useCallback(
+		async (requestId: string, decision: "approved" | "denied") => {
+			try {
+				await decideApproval(requestId, decision);
+			} catch (error) {
+				notifyError(error instanceof Error ? error.message : "Could not apply decision.");
+			}
+		},
+		[decideApproval],
+	);
 	const {
 		projects: aggregateProjects,
 		board: aggregateBoard,
@@ -468,6 +498,7 @@ export default function App(): ReactElement {
 		panel: homeSidebarAgentPanel,
 		summary: homeSidebarAgentSummary,
 		taskId: homeSidebarAgentTaskId,
+		restartSession: restartHomeSidebarAgent,
 	} = useHomeSidebarAgentPanel({
 		currentProjectId,
 		hasNoProjects,
@@ -778,6 +809,23 @@ export default function App(): ReactElement {
 		});
 	}, [board.columns, currentProjectId, homeSidebarAgentSummary, homeSidebarAgentTaskId, sendTaskSessionInput]);
 
+	const handleRestartBoardAgent = useCallback(async () => {
+		if (!homeSidebarAgentTaskId) {
+			notifyError("Board agent is not ready yet. Open Settings and make sure an agent CLI is configured.");
+			return;
+		}
+		showAppToast({
+			intent: "primary",
+			message: "Restarting board agent…",
+			timeout: 3000,
+		});
+		try {
+			await restartHomeSidebarAgent();
+		} catch (error) {
+			notifyError(error instanceof Error ? error.message : "Could not restart the board agent.");
+		}
+	}, [homeSidebarAgentTaskId, restartHomeSidebarAgent]);
+
 	useAppHotkeys({
 		selectedCard,
 		isDetailTerminalOpen,
@@ -985,6 +1033,8 @@ export default function App(): ReactElement {
 						isAggregateView ? false : selectedCard ? isDetailTerminalStarting : isHomeTerminalStarting
 					}
 					onOpenSettings={handleOpenSettings}
+					onOpenSupervisor={currentProjectId ? handleOpenSupervisorPanel : undefined}
+					supervisorPendingCount={approvalQueuePending.length}
 					showDebugButton={debugModeEnabled}
 					onOpenDebugDialog={debugModeEnabled ? handleOpenDebugDialog : undefined}
 					shortcuts={isAggregateView ? [] : shortcuts}
@@ -1078,6 +1128,7 @@ export default function App(): ReactElement {
 												onStartTask={handleStartTaskFromBoard}
 												onStartAllTasks={handleStartAllBacklogTasksFromBoard}
 												onRunBacklogCleanup={handleRunBacklogCleanup}
+												onRestartBoardAgent={handleRestartBoardAgent}
 												onClearTrash={handleOpenClearTrash}
 												editingTaskId={editingTaskId}
 												inlineTaskEditor={inlineTaskEditor}
@@ -1159,6 +1210,7 @@ export default function App(): ReactElement {
 								onStartTask={handleStartTaskFromBoard}
 								onStartAllTasks={handleStartAllBacklogTasksFromBoard}
 								onRunBacklogCleanup={handleRunBacklogCleanup}
+								onRestartBoardAgent={handleRestartBoardAgent}
 								onClearTrash={handleOpenClearTrash}
 								editingTaskId={editingTaskId}
 								inlineTaskEditor={inlineTaskEditor}
@@ -1227,6 +1279,16 @@ export default function App(): ReactElement {
 					refreshSettingsRuntimeProjectConfig();
 				}}
 			/>
+			<Dialog open={isSupervisorPanelOpen} onOpenChange={setIsSupervisorPanelOpen}>
+				<DialogHeader title="Supervisor" />
+				<DialogBody>
+					<SupervisorPanel
+						pending={approvalQueuePending}
+						recent={approvalQueueRecent}
+						onDecide={handleSupervisorDecision}
+					/>
+				</DialogBody>
+			</Dialog>
 			<DebugDialog
 				open={isDebugDialogOpen}
 				onOpenChange={handleDebugDialogOpenChange}

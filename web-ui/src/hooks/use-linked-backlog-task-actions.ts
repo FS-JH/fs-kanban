@@ -33,7 +33,7 @@ export function useLinkedBacklogTaskActions({
 	setBoard: Dispatch<SetStateAction<BoardData>>;
 	setSelectedTaskId: Dispatch<SetStateAction<string | null>>;
 	stopTaskSession: (taskId: string) => Promise<void>;
-	cleanupTaskWorkspace: (taskId: string) => Promise<unknown>;
+	cleanupTaskWorkspace: (taskId: string, options?: { preserveJournal?: boolean }) => Promise<unknown>;
 	maybeRequestNotificationPermissionForTaskStart: () => void;
 	kickoffTaskInProgress: (
 		task: BoardCard,

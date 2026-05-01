@@ -31,6 +31,7 @@ import {
 	loadWorkspaceStateById,
 } from "../state/workspace-state.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
+import type { SupervisorApprovalQueue } from "../terminal/supervisor-approval-queue.js";
 import { createTerminalWebSocketBridge } from "../terminal/ws-server.js";
 import { type RuntimeTrpcContext, type RuntimeTrpcWorkspaceScope, runtimeAppRouter } from "../trpc/app-router.js";
 import { createHooksApi } from "../trpc/hooks-api.js";
@@ -59,6 +60,7 @@ interface DisposeTrackedWorkspaceResult {
 export interface CreateRuntimeServerDependencies {
 	workspaceRegistry: WorkspaceRegistry;
 	runtimeStateHub: RuntimeStateHub;
+	approvalQueue?: SupervisorApprovalQueue;
 	warn: (message: string) => void;
 	ensureTerminalManagerForWorkspace: (workspaceId: string, repoPath: string) => Promise<TerminalSessionManager>;
 	resolveInteractiveShellCommand: () => { binary: string; args: string[] };
@@ -222,9 +224,11 @@ export async function createRuntimeServer(deps: CreateRuntimeServerDependencies)
 				loadScopedRuntimeConfig: deps.workspaceRegistry.loadScopedRuntimeConfig,
 				setActiveRuntimeConfig: deps.workspaceRegistry.setActiveRuntimeConfig,
 				getScopedTerminalManager,
+				getTerminalManagerForWorkspace: deps.workspaceRegistry.getTerminalManagerForWorkspace,
 				resolveInteractiveShellCommand: deps.resolveInteractiveShellCommand,
 				runCommand: deps.runCommand,
 				prepareForStateReset,
+				approvalQueue: deps.approvalQueue,
 			}),
 			workspaceApi: createWorkspaceApi({
 				ensureTerminalManagerForWorkspace: deps.ensureTerminalManagerForWorkspace,

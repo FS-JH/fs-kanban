@@ -22,6 +22,7 @@ interface UseHomeSidebarAgentPanelResult {
 	panel: ReactElement | null;
 	summary: RuntimeTaskSessionSummary | null;
 	taskId: string | null;
+	restartSession: () => Promise<void>;
 }
 
 export function useHomeSidebarAgentPanel({
@@ -57,7 +58,7 @@ export function useHomeSidebarAgentPanel({
 		return mergedSessionSummaries;
 	}, [sessionSummaries, taskSessions]);
 
-	const { taskId } = useHomeAgentSession({
+	const { taskId, restartSession } = useHomeAgentSession({
 		currentProjectId,
 		runtimeProjectConfig,
 		workspaceGit,
@@ -83,6 +84,7 @@ export function useHomeSidebarAgentPanel({
 			panel: null,
 			summary: null,
 			taskId: null,
+			restartSession,
 		};
 	}
 
@@ -95,6 +97,7 @@ export function useHomeSidebarAgentPanel({
 			),
 			summary: null,
 			taskId: null,
+			restartSession,
 		};
 	}
 
@@ -117,6 +120,7 @@ export function useHomeSidebarAgentPanel({
 			),
 			summary: homeAgentPanelSummary,
 			taskId,
+			restartSession,
 		};
 	}
 
@@ -128,5 +132,6 @@ export function useHomeSidebarAgentPanel({
 		),
 		summary: null,
 		taskId: null,
+		restartSession,
 	};
 }

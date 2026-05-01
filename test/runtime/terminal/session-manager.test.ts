@@ -1,7 +1,12 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract.js";
 import { buildShellCommandLine } from "../../../src/core/shell.js";
+import { OutputJournal } from "../../../src/terminal/output-journal.js";
+import { MAX_HISTORY_BYTES } from "../../../src/terminal/pty-session.js";
 import { TerminalSessionManager } from "../../../src/terminal/session-manager.js";
 
 function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
@@ -22,9 +27,80 @@ function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): Runt
 	};
 }
 
+async function waitForReplayText(dir: string, taskId: string, expected: string): Promise<string> {
+	const deadline = Date.now() + 5_000;
+	let text = "";
+	while (Date.now() < deadline) {
+		const replay = await OutputJournal.replay({ dir, taskId });
+		text = Buffer.concat(replay).toString("utf8");
+		if (text.includes(expected)) {
+			return text;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+	return text;
+}
+
 describe("TerminalSessionManager", () => {
 	afterEach(() => {
 		vi.useRealTimers();
+	});
+
+	it("accepts a workspaceJournalDir option", () => {
+		const manager = new TerminalSessionManager({ workspaceJournalDir: "/tmp/fs-kanban-test-journals" });
+
+		expect(manager.listSummaries()).toEqual([]);
+	});
+
+	it("writes configured shell session output to an OutputJournal", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "fs-kanban-manager-journal-"));
+		try {
+			const manager = new TerminalSessionManager({ workspaceJournalDir: dir });
+			const taskId = "task-journal";
+			let detach: (() => void) | null = null;
+			const exited = new Promise<number | null>((resolve) => {
+				detach = manager.attach(taskId, {
+					onExit: (exitCode) => {
+						detach?.();
+						resolve(exitCode);
+					},
+				});
+			});
+
+			await manager.startShellSession({
+				taskId,
+				cwd: dir,
+				binary: process.execPath,
+				args: ["-e", "process.stdout.write('journal-output')"],
+			});
+
+			expect(await exited).toBe(0);
+			const replayText = await waitForReplayText(dir, taskId, "journal-output");
+			expect(replayText).toContain("journal-output");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("hydrateFromRecord stores workspaceId for getWorkspaceId(taskId)", () => {
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord(
+			{
+				"task-1": createSummary({ taskId: "task-1", state: "running" }),
+			},
+			{},
+			"ws-foo",
+		);
+		expect(manager.getWorkspaceId("task-1")).toBe("ws-foo");
+		expect(manager.getWorkspaceId("missing")).toBeNull();
+	});
+
+	it("getWorkspaceId returns null when workspaceId was not provided to hydrate", () => {
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"task-1": createSummary({ taskId: "task-1", state: "running" }),
+		});
+		expect(manager.getWorkspaceId("task-1")).toBeNull();
 	});
 
 	it("clears trust prompt state when transitioning to review", () => {
@@ -88,6 +164,34 @@ describe("TerminalSessionManager", () => {
 		expect(hydrated?.reviewReason).toBe("interrupted");
 	});
 
+	it("hydrateFromRecord demotes a running summary to interrupted (no PTY exists post-restart)", () => {
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"t-zombie": createSummary({ taskId: "t-zombie", state: "running", pid: 999999 }),
+		});
+		const after = manager.getSummary("t-zombie");
+		expect(after?.state).toBe("interrupted");
+		expect(after?.reviewReason).toBe("interrupted");
+		expect(after?.pid).toBeNull();
+	});
+
+	it("hydrateFromRecord also demotes awaiting_review to interrupted (active state without process)", () => {
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"t-await": createSummary({ taskId: "t-await", state: "awaiting_review", reviewReason: "attention", pid: 1 }),
+		});
+		expect(manager.getSummary("t-await")?.state).toBe("interrupted");
+	});
+
+	it("hydrateFromRecord leaves non-active states untouched", () => {
+		const manager = new TerminalSessionManager();
+		manager.hydrateFromRecord({
+			"t-ok": createSummary({ taskId: "t-ok", state: "interrupted", reviewReason: "exit", pid: null }),
+		});
+		expect(manager.getSummary("t-ok")?.state).toBe("interrupted");
+		expect(manager.getSummary("t-ok")?.reviewReason).toBe("exit");
+	});
+
 	it("hydrates persisted replay output history for interrupted sessions", () => {
 		const manager = new TerminalSessionManager();
 		const onOutput = vi.fn();
@@ -107,6 +211,30 @@ describe("TerminalSessionManager", () => {
 		expect(onOutput).toHaveBeenCalledTimes(1);
 		expect((onOutput.mock.calls[0]?.[0] as Buffer).toString("utf8")).toBe("persisted output");
 		expect(manager.getSummary("task-1")?.state).toBe("interrupted");
+	});
+
+	it("caps hydrated replay output history to the latest bytes", () => {
+		const manager = new TerminalSessionManager();
+		const staleChunk = Buffer.from("stale:", "utf8");
+		const fillerChunk = Buffer.alloc(MAX_HISTORY_BYTES - 4, "m");
+		const latestChunk = Buffer.from("latest", "utf8");
+
+		manager.hydrateFromRecord(
+			{
+				"task-1": createSummary({ state: "running" }),
+			},
+			{
+				"task-1": [staleChunk, fillerChunk, latestChunk],
+			},
+		);
+
+		const history = manager.listReplayHistories()["task-1"] ?? [];
+		const replay = Buffer.concat(history);
+
+		expect(replay.byteLength).toBe(MAX_HISTORY_BYTES);
+		expect(replay.toString("utf8").endsWith("latest")).toBe(true);
+		expect(replay.toString("utf8")).not.toContain("stale:");
+		expect(history.at(-1)?.toString("utf8")).toBe("latest");
 	});
 
 	it("recovers stale running sessions without active processes as interrupted", () => {
@@ -326,6 +454,7 @@ describe("TerminalSessionManager", () => {
 			summary: createSummary({
 				state: "awaiting_review",
 				reviewReason: "hook",
+				agentId: "codex",
 				latestHookActivity: {
 					activityText: "Waiting for approval",
 					toolName: "Read",

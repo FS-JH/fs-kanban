@@ -6,13 +6,16 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 
 import type {
+	RuntimeApprovalRequest,
+	RuntimeApprovalsDecideInput,
+	RuntimeApprovalsHistoryInput,
+	RuntimeApprovalsListInput,
+	RuntimeApprovalsListResponse,
 	RuntimeCommandRunRequest,
 	RuntimeCommandRunResponse,
 	RuntimeConfigResponse,
 	RuntimeConfigSaveRequest,
 	RuntimeDebugResetAllStateResponse,
-	RuntimeOpenFileRequest,
-	RuntimeOpenFileResponse,
 	RuntimeGitCheckoutRequest,
 	RuntimeGitCheckoutResponse,
 	RuntimeGitCommitDiffRequest,
@@ -26,15 +29,17 @@ import type {
 	RuntimeGitSyncResponse,
 	RuntimeHookIngestRequest,
 	RuntimeHookIngestResponse,
+	RuntimeOpenFileRequest,
+	RuntimeOpenFileResponse,
 	RuntimeProjectAddRequest,
 	RuntimeProjectAddResponse,
 	RuntimeProjectDirectoryPickerResponse,
 	RuntimeProjectRemoveRequest,
 	RuntimeProjectRemoveResponse,
 	RuntimeProjectsResponse,
-	RuntimeSlashCommandsResponse,
 	RuntimeShellSessionStartRequest,
 	RuntimeShellSessionStartResponse,
+	RuntimeSlashCommandsResponse,
 	RuntimeTaskSessionInputRequest,
 	RuntimeTaskSessionInputResponse,
 	RuntimeTaskSessionStartRequest,
@@ -51,8 +56,8 @@ import type {
 	RuntimeWorkspaceImportBacklogTasksResponse,
 	RuntimeWorkspaceImportedTaskLookupRequest,
 	RuntimeWorkspaceImportedTaskLookupResponse,
-	RuntimeWorkspaceStateResponse,
 	RuntimeWorkspaceStateNotifyResponse,
+	RuntimeWorkspaceStateResponse,
 	RuntimeWorkspaceStateSaveRequest,
 	RuntimeWorktreeDeleteRequest,
 	RuntimeWorktreeDeleteResponse,
@@ -60,13 +65,16 @@ import type {
 	RuntimeWorktreeEnsureResponse,
 } from "../core/api-contract.js";
 import {
+	runtimeApprovalRequestSchema,
+	runtimeApprovalsDecideInputSchema,
+	runtimeApprovalsHistoryInputSchema,
+	runtimeApprovalsListInputSchema,
+	runtimeApprovalsListResponseSchema,
 	runtimeCommandRunRequestSchema,
 	runtimeCommandRunResponseSchema,
 	runtimeConfigResponseSchema,
 	runtimeConfigSaveRequestSchema,
 	runtimeDebugResetAllStateResponseSchema,
-	runtimeOpenFileRequestSchema,
-	runtimeOpenFileResponseSchema,
 	runtimeGitCheckoutRequestSchema,
 	runtimeGitCheckoutResponseSchema,
 	runtimeGitCommitDiffRequestSchema,
@@ -80,15 +88,17 @@ import {
 	runtimeGitSyncResponseSchema,
 	runtimeHookIngestRequestSchema,
 	runtimeHookIngestResponseSchema,
+	runtimeOpenFileRequestSchema,
+	runtimeOpenFileResponseSchema,
 	runtimeProjectAddRequestSchema,
 	runtimeProjectAddResponseSchema,
 	runtimeProjectDirectoryPickerResponseSchema,
 	runtimeProjectRemoveRequestSchema,
 	runtimeProjectRemoveResponseSchema,
 	runtimeProjectsResponseSchema,
-	runtimeSlashCommandsResponseSchema,
 	runtimeShellSessionStartRequestSchema,
 	runtimeShellSessionStartResponseSchema,
+	runtimeSlashCommandsResponseSchema,
 	runtimeTaskSessionInputRequestSchema,
 	runtimeTaskSessionInputResponseSchema,
 	runtimeTaskSessionStartRequestSchema,
@@ -105,8 +115,8 @@ import {
 	runtimeWorkspaceImportBacklogTasksResponseSchema,
 	runtimeWorkspaceImportedTaskLookupRequestSchema,
 	runtimeWorkspaceImportedTaskLookupResponseSchema,
-	runtimeWorkspaceStateResponseSchema,
 	runtimeWorkspaceStateNotifyResponseSchema,
+	runtimeWorkspaceStateResponseSchema,
 	runtimeWorkspaceStateSaveRequestSchema,
 	runtimeWorktreeDeleteRequestSchema,
 	runtimeWorktreeDeleteResponseSchema,
@@ -149,10 +159,11 @@ export interface RuntimeTrpcContext {
 			scope: RuntimeTrpcWorkspaceScope,
 			input: RuntimeCommandRunRequest,
 		) => Promise<RuntimeCommandRunResponse>;
-		resetAllState: (
-			scope: RuntimeTrpcWorkspaceScope | null,
-		) => Promise<RuntimeDebugResetAllStateResponse>;
+		resetAllState: (scope: RuntimeTrpcWorkspaceScope | null) => Promise<RuntimeDebugResetAllStateResponse>;
 		openFile: (input: RuntimeOpenFileRequest) => Promise<RuntimeOpenFileResponse>;
+		listApprovals: (input: RuntimeApprovalsListInput) => Promise<RuntimeApprovalsListResponse>;
+		decideApproval: (input: RuntimeApprovalsDecideInput) => Promise<RuntimeApprovalRequest>;
+		listApprovalHistory: (input: RuntimeApprovalsHistoryInput) => Promise<RuntimeApprovalRequest[]>;
 	};
 	workspaceApi: {
 		loadGitSummary: (
@@ -331,17 +342,35 @@ export const runtimeAppRouter = t.router({
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.runCommand(ctx.workspaceScope, input);
 			}),
-		resetAllState: t.procedure
-			.output(runtimeDebugResetAllStateResponseSchema)
-			.mutation(async ({ ctx }) => {
-				return await ctx.runtimeApi.resetAllState(ctx.workspaceScope);
-			}),
+		resetAllState: t.procedure.output(runtimeDebugResetAllStateResponseSchema).mutation(async ({ ctx }) => {
+			return await ctx.runtimeApi.resetAllState(ctx.workspaceScope);
+		}),
 		openFile: t.procedure
 			.input(runtimeOpenFileRequestSchema)
 			.output(runtimeOpenFileResponseSchema)
 			.mutation(async ({ ctx, input }) => {
 				return await ctx.runtimeApi.openFile(input);
 			}),
+		approvals: t.router({
+			list: t.procedure
+				.input(runtimeApprovalsListInputSchema)
+				.output(runtimeApprovalsListResponseSchema)
+				.query(async ({ ctx, input }) => {
+					return await ctx.runtimeApi.listApprovals(input);
+				}),
+			decide: t.procedure
+				.input(runtimeApprovalsDecideInputSchema)
+				.output(runtimeApprovalRequestSchema)
+				.mutation(async ({ ctx, input }) => {
+					return await ctx.runtimeApi.decideApproval(input);
+				}),
+			history: t.procedure
+				.input(runtimeApprovalsHistoryInputSchema)
+				.output(z.array(runtimeApprovalRequestSchema))
+				.query(async ({ ctx, input }) => {
+					return await ctx.runtimeApi.listApprovalHistory(input);
+				}),
+		}),
 	}),
 	workspace: t.router({
 		getGitSummary: workspaceProcedure
