@@ -7,7 +7,7 @@ import type { RuntimeTaskSessionSummary } from "../../../src/core/api-contract.j
 import { buildShellCommandLine } from "../../../src/core/shell.js";
 import { OutputJournal } from "../../../src/terminal/output-journal.js";
 import { MAX_HISTORY_BYTES } from "../../../src/terminal/pty-session.js";
-import { TerminalSessionManager } from "../../../src/terminal/session-manager.js";
+import { normalizeStaleSessionSummary, TerminalSessionManager } from "../../../src/terminal/session-manager.js";
 
 function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
 	return {
@@ -190,6 +190,28 @@ describe("TerminalSessionManager", () => {
 		});
 		expect(manager.getSummary("t-ok")?.state).toBe("interrupted");
 		expect(manager.getSummary("t-ok")?.reviewReason).toBe("exit");
+	});
+
+	it("exports normalizeStaleSessionSummary so non-hydrated callers can sanitize disk snapshots", () => {
+		// Regression: buildWorkspaceStateSnapshot in workspace-registry returns disk
+		// state verbatim when no terminal manager exists for the workspace. Without
+		// this export + that call site, stale "running" summaries from prior runtime
+		// invocations leak through to the frontend and block actions like the
+		// backlog cleanup button.
+		const stale = createSummary({ state: "running", reviewReason: null, pid: 999999 });
+		const normalized = normalizeStaleSessionSummary(stale);
+		expect(normalized.state).toBe("interrupted");
+		expect(normalized.reviewReason).toBe("interrupted");
+		expect(normalized.pid).toBeNull();
+
+		const awaiting = createSummary({ state: "awaiting_review", reviewReason: "attention", pid: 12345 });
+		const normalizedAwaiting = normalizeStaleSessionSummary(awaiting);
+		expect(normalizedAwaiting.state).toBe("interrupted");
+
+		const intact = createSummary({ state: "interrupted", reviewReason: "exit", pid: null });
+		const passthrough = normalizeStaleSessionSummary(intact);
+		expect(passthrough.state).toBe("interrupted");
+		expect(passthrough.reviewReason).toBe("exit");
 	});
 
 	it("hydrates persisted replay output history for interrupted sessions", () => {

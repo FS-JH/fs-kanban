@@ -746,14 +746,6 @@ export default function App(): ReactElement {
 			notifyError("Board agent is not ready yet. Open Settings and make sure an agent CLI is configured.");
 			return;
 		}
-		if (!homeSidebarAgentSummary) {
-			showAppToast({
-				intent: "warning",
-				message: "Board agent is still starting. Try backlog cleanup again in a moment.",
-				timeout: 4000,
-			});
-			return;
-		}
 		if (!backlogColumn || backlogColumn.cards.length === 0) {
 			showAppToast({
 				intent: "warning",
@@ -762,24 +754,42 @@ export default function App(): ReactElement {
 			});
 			return;
 		}
-		const homeAgentStatus = getRuntimeTaskSessionStatus(homeSidebarAgentSummary);
-		if (homeAgentStatus.kind === "running") {
+		// Auto-recover from interrupted/failed: restart the home agent and tell
+		// the user to retry once it's ready. (Sending input to a dead session
+		// would just be lost.)
+		const homeAgentStatus = homeSidebarAgentSummary
+			? getRuntimeTaskSessionStatus(homeSidebarAgentSummary)
+			: null;
+		if (
+			homeAgentStatus &&
+			(homeAgentStatus.kind === "interrupted" || homeAgentStatus.kind === "failed")
+		) {
+			showAppToast({
+				intent: "primary",
+				message: "Restarting board agent — try cleanup again once it's ready.",
+				timeout: 4000,
+			});
+			try {
+				await restartHomeSidebarAgent();
+			} catch (error) {
+				notifyError(error instanceof Error ? error.message : "Could not restart the board agent.");
+			}
+			return;
+		}
+		// Refuse only when the agent is actively waiting on the user. Don't
+		// block on bare "running" — the home/sidebar agent is just a board
+		// helper, and a fresh-start "running" window before its prompt arrives
+		// is the most common case where the user clicks cleanup. The runtime
+		// will buffer the input.
+		if (homeAgentStatus?.kind === "needs_approval") {
 			showAppToast({
 				intent: "warning",
-				message: "Board agent is already running. Let it finish before starting backlog cleanup.",
+				message: "Board agent is waiting for approval. Approve that step before starting backlog cleanup.",
 				timeout: 6000,
 			});
 			return;
 		}
-		if (homeAgentStatus.kind === "needs_approval") {
-			showAppToast({
-				intent: "warning",
-				message: "Board agent is already waiting for approval. Approve that step before starting backlog cleanup.",
-				timeout: 6000,
-			});
-			return;
-		}
-		if (homeAgentStatus.kind === "needs_input" || homeAgentStatus.kind === "needs_review") {
+		if (homeAgentStatus?.kind === "needs_input" || homeAgentStatus?.kind === "needs_review") {
 			showAppToast({
 				intent: "warning",
 				message: "Board agent already needs your attention. Resolve that first, then run cleanup again.",
@@ -787,14 +797,10 @@ export default function App(): ReactElement {
 			});
 			return;
 		}
-		if (homeAgentStatus.kind === "failed" || homeAgentStatus.kind === "interrupted") {
-			showAppToast({
-				intent: "danger",
-				message: "Board agent is not in a usable state. Restart it before running backlog cleanup.",
-				timeout: 6000,
-			});
-			return;
-		}
+		// Fall through for: idle / awaiting_review (ready_for_review) / running
+		// without active work / no summary yet (just-started). The runtime
+		// buffers the cleanup prompt; codex/claude pick it up on the next
+		// prompt cycle.
 		const result = await sendTaskSessionInput(homeSidebarAgentTaskId, BACKLOG_CLEANUP_PROMPT, {
 			appendNewline: true,
 		});
@@ -807,7 +813,14 @@ export default function App(): ReactElement {
 			message: "Backlog cleanup started in the board agent.",
 			timeout: 4000,
 		});
-	}, [board.columns, currentProjectId, homeSidebarAgentSummary, homeSidebarAgentTaskId, sendTaskSessionInput]);
+	}, [
+		board.columns,
+		currentProjectId,
+		homeSidebarAgentSummary,
+		homeSidebarAgentTaskId,
+		restartHomeSidebarAgent,
+		sendTaskSessionInput,
+	]);
 
 	const handleRestartBoardAgent = useCallback(async () => {
 		if (!homeSidebarAgentTaskId) {

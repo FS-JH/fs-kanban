@@ -162,7 +162,7 @@ function cloneSummary(summary: RuntimeTaskSessionSummary): RuntimeTaskSessionSum
 	};
 }
 
-function normalizeStaleSessionSummary(summary: RuntimeTaskSessionSummary): RuntimeTaskSessionSummary {
+export function normalizeStaleSessionSummary(summary: RuntimeTaskSessionSummary): RuntimeTaskSessionSummary {
 	if (!isActiveState(summary.state)) {
 		return cloneSummary(summary);
 	}
