@@ -227,7 +227,7 @@ export function ProjectNavigationPanel({
 							onClick={() => onActiveSectionChange("agent")}
 							disabled={!canShowAgentSection}
 							className={cn(
-								"cursor-pointer rounded-sm px-2 py-1 text-xs font-medium flex items-center justify-center gap-1.5",
+								"cursor-pointer rounded-sm px-2 py-1 text-xs font-medium flex items-center justify-center gap-1.5 whitespace-nowrap min-w-0",
 								activeSection === "agent"
 									? "bg-surface-4 text-text-primary"
 									: "text-text-secondary hover:text-text-primary",
@@ -245,19 +245,24 @@ export function ProjectNavigationPanel({
 									aria-hidden
 								/>
 							) : null}
-							<span>Board Agent</span>
-							{agentStatus && agentStatus.kind !== "idle" ? (
-								<span className="text-text-tertiary text-[10px] font-normal">
-									· {agentStatus.label}
-								</span>
-							) : null}
+							<span className="truncate">Board Agent</span>
 						</button>
 					</div>
 				</div>
-				{activeSection === "agent" ? (
+				{/* Surface latest activity ONLY when on the agent tab AND the agent is
+				    fresh (no session yet, or no recorded activity). Once the agent has
+				    output, the terminal itself is the source of truth — the static help
+				    blurb above it is just visual noise that creates the empty-gap look
+				    in the screenshot. */}
+				{activeSection === "agent" && !agentSectionSummary ? (
 					<p className="text-text-tertiary text-xs" style={{ padding: "8px 4px 0" }}>
-						{agentLatestActivity ??
-							"Add tasks, link dependencies, break work down, and manage your board. Try asking to create and link some tasks to get started."}
+						Add tasks, link dependencies, break work down, and manage your board. Try asking to
+						create and link some tasks to get started.
+					</p>
+				) : null}
+				{activeSection === "agent" && agentLatestActivity ? (
+					<p className="text-text-tertiary text-xs" style={{ padding: "8px 4px 0" }}>
+						{agentLatestActivity}
 					</p>
 				) : null}
 			</div>

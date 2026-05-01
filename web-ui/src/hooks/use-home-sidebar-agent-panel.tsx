@@ -116,6 +116,9 @@ export function useHomeSidebarAgentPanel({
 					terminalBackgroundColor={TERMINAL_THEME_COLORS.surfaceRaised}
 					cursorColor={TERMINAL_THEME_COLORS.textPrimary}
 					showRightBorder={false}
+					onRestart={() => {
+						void restartSession();
+					}}
 				/>
 			),
 			summary: homeAgentPanelSummary,
