@@ -374,6 +374,10 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 		projectTaskCountsByWorkspaceId.delete(workspaceId);
 		const workspacePath = workspacePathsById.get(workspaceId) ?? null;
 		workspacePathsById.delete(workspaceId);
+		// Cancel any pending approval queue entries for this workspace so the
+		// Supervisor panel does not retain ghost requests against a removed
+		// project / disposed workspace.
+		deps.approvalQueue?.cancelPendingForWorkspace(workspaceId);
 		return {
 			terminalManager,
 			workspacePath,

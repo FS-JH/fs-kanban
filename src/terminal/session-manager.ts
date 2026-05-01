@@ -933,6 +933,11 @@ export class TerminalSessionManager implements TerminalSessionService {
 			const currentEntry = this.entries.get(taskId);
 			const currentActive = currentEntry?.active;
 			const currentSummary = currentEntry?.summary;
+			// Always clear the timer reference first; subsequent throws would otherwise
+			// leave it dangling.
+			if (currentActive) {
+				currentActive.supervisedApprovalTimer = null;
+			}
 			if (
 				!currentActive ||
 				!currentSummary ||
@@ -942,11 +947,20 @@ export class TerminalSessionManager implements TerminalSessionService {
 			) {
 				return;
 			}
+			// Write the keystroke FIRST. Only mark the queue auto_approved if the
+			// write actually succeeded — otherwise the queue would say decided while
+			// the agent never received Enter, stranding the prompt.
+			const approveKey = APPROVE_KEYSTROKES[currentSummary.agentId ?? "codex"]?.approve ?? "\r";
+			try {
+				currentActive.session.write(approveKey);
+			} catch {
+				// Leave the queue request pending; the user can manually decide via
+				// the Supervisor panel or the agent will re-prompt.
+				return;
+			}
 			if (request && this.approvalQueue) {
 				this.approvalQueue.decide(request.id, "auto_approved", "policy");
 			}
-			currentActive.session.write(APPROVE_KEYSTROKES[currentSummary.agentId ?? "codex"]?.approve ?? "\r");
-			currentActive.supervisedApprovalTimer = null;
 		}, SUPERVISED_APPROVAL_DELAY_MS);
 		timer.unref?.();
 		entry.active.supervisedApprovalTimer = timer;
@@ -974,17 +988,26 @@ export class TerminalSessionManager implements TerminalSessionService {
 		if (!isPermissionPromptActivity(entry.summary.latestHookActivity)) return null;
 		const liveFingerprint = buildHookActivityFingerprint(entry.summary.latestHookActivity);
 		if (liveFingerprint !== request.fingerprint) return null;
-		const status = decision === "approved" ? "user_approved" : "user_denied";
-		const updated = this.approvalQueue.decide(requestId, status, "user");
-		if (!updated) return null;
 		const keystrokes = APPROVE_KEYSTROKES[entry.summary.agentId ?? "codex"] ?? APPROVE_KEYSTROKES.codex;
 		const key = decision === "approved" ? keystrokes.approve : keystrokes.deny;
+		// Write the PTY keystroke FIRST. Only mark the queue decided if the write
+		// actually succeeded — otherwise a swallowed write error would leave the
+		// queue showing "decided" while the agent never received the keystroke,
+		// stranding the prompt forever.
 		stopPendingSupervisedApproval(entry.active, false);
 		try {
 			entry.active.session.write(key);
-		} catch {
-			// PTY write errors are surfaced via the session's existing error handling.
+		} catch (error) {
+			// Surface the failure: do NOT decide the queue. The Supervisor panel
+			// will keep the request as pending so the user can retry or restart.
+			throw new Error(
+				`Could not deliver approval keystroke to ${entry.summary.agentId ?? "agent"}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
 		}
+		const status = decision === "approved" ? "user_approved" : "user_denied";
+		const updated = this.approvalQueue.decide(requestId, status, "user");
 		return updated;
 	}
 

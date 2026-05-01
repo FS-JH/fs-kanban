@@ -352,23 +352,36 @@ export const runtimeAppRouter = t.router({
 				return await ctx.runtimeApi.openFile(input);
 			}),
 		approvals: t.router({
-			list: t.procedure
+			list: workspaceProcedure
 				.input(runtimeApprovalsListInputSchema)
 				.output(runtimeApprovalsListResponseSchema)
 				.query(async ({ ctx, input }) => {
-					return await ctx.runtimeApi.listApprovals(input);
+					// Authoritative workspaceId comes from the workspace scope, not the
+					// caller-supplied input. The schema field is kept for symmetry but
+					// is overridden here so a misconfigured client cannot read another
+					// workspace's approvals.
+					return await ctx.runtimeApi.listApprovals({
+						...input,
+						workspaceId: ctx.workspaceScope.workspaceId,
+					});
 				}),
-			decide: t.procedure
+			decide: workspaceProcedure
 				.input(runtimeApprovalsDecideInputSchema)
 				.output(runtimeApprovalRequestSchema)
 				.mutation(async ({ ctx, input }) => {
-					return await ctx.runtimeApi.decideApproval(input);
+					return await ctx.runtimeApi.decideApproval({
+						...input,
+						workspaceId: ctx.workspaceScope.workspaceId,
+					});
 				}),
-			history: t.procedure
+			history: workspaceProcedure
 				.input(runtimeApprovalsHistoryInputSchema)
 				.output(z.array(runtimeApprovalRequestSchema))
 				.query(async ({ ctx, input }) => {
-					return await ctx.runtimeApi.listApprovalHistory(input);
+					return await ctx.runtimeApi.listApprovalHistory({
+						...input,
+						workspaceId: ctx.workspaceScope.workspaceId,
+					});
 				}),
 		}),
 	}),
