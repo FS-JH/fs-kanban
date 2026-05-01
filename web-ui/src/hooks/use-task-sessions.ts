@@ -46,6 +46,8 @@ interface StartTaskSessionOptions {
 	agentId?: RuntimeAgentId;
 }
 
+const TERMINAL_SUBMIT_SEQUENCE = "\r";
+
 export interface UseTaskSessionsResult {
 	upsertSession: (summary: RuntimeTaskSessionSummary) => void;
 	ensureTaskWorkspace: (task: BoardCard) => Promise<EnsureTaskWorkspaceResult>;
@@ -192,7 +194,7 @@ export function useTaskSessions({
 				const sent =
 					options?.mode === "paste"
 						? !appendNewline && controller.paste(text)
-						: controller.input(appendNewline ? `${text}\n` : text);
+						: controller.input(appendNewline ? `${text}${TERMINAL_SUBMIT_SEQUENCE}` : text);
 				if (sent) {
 					return { ok: true };
 				}
