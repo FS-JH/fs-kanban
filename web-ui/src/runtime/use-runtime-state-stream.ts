@@ -1,6 +1,7 @@
-import { useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 
 import type {
+	RuntimeApprovalRequest,
 	RuntimeProjectSummary,
 	RuntimeStateStreamMessage,
 	RuntimeStateStreamProjectsMessage,
@@ -40,12 +41,21 @@ function getRuntimeStreamUrl(workspaceId: string | null): string {
 	return url.toString();
 }
 
+export interface ApprovalQueueState {
+	pending: RuntimeApprovalRequest[];
+	recent: RuntimeApprovalRequest[];
+}
+
+const RECENT_APPROVAL_LIMIT = 50;
+
 export interface UseRuntimeStateStreamResult {
 	currentProjectId: string | null;
 	projects: RuntimeProjectSummary[];
 	workspaceState: RuntimeWorkspaceStateResponse | null;
 	workspaceMetadata: RuntimeWorkspaceMetadata | null;
 	latestTaskReadyForReview: RuntimeStateStreamTaskReadyForReviewMessage | null;
+	approvalQueueState: ApprovalQueueState;
+	dispatchSeedApprovals: (input: ApprovalQueueState) => void;
 	streamError: string | null;
 	isRuntimeDisconnected: boolean;
 	hasReceivedSnapshot: boolean;
@@ -57,6 +67,7 @@ interface RuntimeStateStreamStore {
 	workspaceState: RuntimeWorkspaceStateResponse | null;
 	workspaceMetadata: RuntimeWorkspaceMetadata | null;
 	latestTaskReadyForReview: RuntimeStateStreamTaskReadyForReviewMessage | null;
+	approvalQueueState: ApprovalQueueState;
 	streamError: string | null;
 	isRuntimeDisconnected: boolean;
 	hasReceivedSnapshot: boolean;
@@ -75,6 +86,9 @@ type RuntimeStateStreamAction =
 	| { type: "task_ready_for_review"; payload: RuntimeStateStreamTaskReadyForReviewMessage }
 	| { type: "workspace_state_updated"; workspaceState: RuntimeWorkspaceStateResponse }
 	| { type: "task_sessions_updated"; summaries: RuntimeTaskSessionSummary[] }
+	| { type: "approval_request_queued"; request: RuntimeApprovalRequest }
+	| { type: "approval_request_decided"; request: RuntimeApprovalRequest }
+	| { type: "seed_approvals"; pending: RuntimeApprovalRequest[]; recent: RuntimeApprovalRequest[] }
 	| { type: "stream_error"; message: string }
 	| { type: "stream_disconnected"; message: string };
 
@@ -85,6 +99,7 @@ function createInitialRuntimeStateStreamStore(requestedWorkspaceId: string | nul
 		workspaceState: null,
 		workspaceMetadata: null,
 		latestTaskReadyForReview: null,
+		approvalQueueState: { pending: [], recent: [] },
 		streamError: null,
 		isRuntimeDisconnected: false,
 		hasReceivedSnapshot: false,
@@ -138,6 +153,7 @@ function runtimeStateStreamReducer(
 			workspaceState: nextWorkspaceState,
 			workspaceMetadata: action.payload.workspaceMetadata,
 			latestTaskReadyForReview: state.latestTaskReadyForReview,
+			approvalQueueState: state.approvalQueueState,
 			streamError: null,
 			isRuntimeDisconnected: false,
 			hasReceivedSnapshot: true,
@@ -189,6 +205,74 @@ function runtimeStateStreamReducer(
 			workspaceState: {
 				...state.workspaceState,
 				sessions: mergeTaskSessionSummaries(state.workspaceState.sessions, action.summaries),
+			},
+		};
+	}
+	if (action.type === "approval_request_queued") {
+		const { request } = action;
+		const pending = [...state.approvalQueueState.pending.filter((entry) => entry.id !== request.id), request];
+		const recent = state.approvalQueueState.recent.filter((entry) => entry.id !== request.id);
+		return {
+			...state,
+			approvalQueueState: { pending, recent },
+		};
+	}
+	if (action.type === "approval_request_decided") {
+		const { request } = action;
+		const pending = state.approvalQueueState.pending.filter((entry) => entry.id !== request.id);
+		const recent = [request, ...state.approvalQueueState.recent.filter((entry) => entry.id !== request.id)].slice(
+			0,
+			RECENT_APPROVAL_LIMIT,
+		);
+		return {
+			...state,
+			approvalQueueState: { pending, recent },
+		};
+	}
+	if (action.type === "seed_approvals") {
+		// Merge seed (snapshot from initial tRPC fetch) with current live state
+		// (driven by WS events). Rule: a "decided" status (auto/user_approved/denied,
+		// timed_out) ALWAYS wins over "pending" — both directions — so neither
+		// stale seeds nor stale live states can keep a request in the wrong bucket.
+		const byId = new Map<string, RuntimeApprovalRequest>();
+		const apply = (entry: RuntimeApprovalRequest): void => {
+			const existing = byId.get(entry.id);
+			if (!existing) {
+				byId.set(entry.id, entry);
+				return;
+			}
+			// Decided beats pending regardless of source.
+			if (existing.status !== "pending" && entry.status === "pending") return;
+			if (existing.status === "pending" && entry.status !== "pending") {
+				byId.set(entry.id, entry);
+				return;
+			}
+			// Same bucket: prefer the latest (highest decidedAt for decided, or
+			// keep newer createdAt for pending).
+			if (entry.status === "pending") {
+				if (entry.createdAt >= existing.createdAt) byId.set(entry.id, entry);
+				return;
+			}
+			const existingTs = existing.decidedAt ?? 0;
+			const entryTs = entry.decidedAt ?? 0;
+			if (entryTs >= existingTs) byId.set(entry.id, entry);
+		};
+		// Apply seed first, then live (live entries always pass the merge guard).
+		for (const entry of action.pending) apply(entry);
+		for (const entry of action.recent) apply(entry);
+		for (const entry of state.approvalQueueState.pending) apply(entry);
+		for (const entry of state.approvalQueueState.recent) apply(entry);
+		const all = Array.from(byId.values());
+		return {
+			...state,
+			approvalQueueState: {
+				pending: all
+					.filter((entry) => entry.status === "pending")
+					.sort((a, b) => a.createdAt - b.createdAt),
+				recent: all
+					.filter((entry) => entry.status !== "pending")
+					.sort((a, b) => (b.decidedAt ?? 0) - (a.decidedAt ?? 0))
+					.slice(0, RECENT_APPROVAL_LIMIT),
 			},
 		};
 	}
@@ -335,6 +419,20 @@ export function useRuntimeStateStream(requestedWorkspaceId: string | null): UseR
 						});
 						return;
 					}
+					if (payload.type === "approval_request_queued") {
+						if (payload.workspaceId !== activeWorkspaceId) {
+							return;
+						}
+						dispatch({ type: "approval_request_queued", request: payload.request });
+						return;
+					}
+					if (payload.type === "approval_request_decided") {
+						if (payload.workspaceId !== activeWorkspaceId) {
+							return;
+						}
+						dispatch({ type: "approval_request_decided", request: payload.request });
+						return;
+					}
 					if (payload.type === "error") {
 						dispatch({
 							type: "stream_error",
@@ -377,12 +475,25 @@ export function useRuntimeStateStream(requestedWorkspaceId: string | null): UseR
 		};
 	}, [requestedWorkspaceId]);
 
+	const dispatchSeedApprovals = useCallback(
+		(input: ApprovalQueueState) => {
+			dispatch({
+				type: "seed_approvals",
+				pending: input.pending,
+				recent: input.recent,
+			});
+		},
+		[],
+	);
+
 	return {
 		currentProjectId: state.currentProjectId,
 		projects: state.projects,
 		workspaceState: state.workspaceState,
 		workspaceMetadata: state.workspaceMetadata,
 		latestTaskReadyForReview: state.latestTaskReadyForReview,
+		approvalQueueState: state.approvalQueueState,
+		dispatchSeedApprovals,
 		streamError: state.streamError,
 		isRuntimeDisconnected: state.isRuntimeDisconnected,
 		hasReceivedSnapshot: state.hasReceivedSnapshot,

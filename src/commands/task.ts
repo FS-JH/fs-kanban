@@ -294,10 +294,12 @@ async function stopTaskRuntimeSession(
 async function deleteTaskWorkspace(
 	runtimeClient: ReturnType<typeof createRuntimeTrpcClient>,
 	taskId: string,
+	options: { preserveJournal?: boolean } = {},
 ): Promise<{ removed: boolean; error?: string }> {
 	try {
 		const deleted = await runtimeClient.workspace.deleteWorktree.mutate({
 			taskId,
+			preserveJournal: options.preserveJournal ?? true,
 		});
 		return {
 			removed: deleted.removed,
@@ -333,13 +335,13 @@ async function createTask(input: {
 			"backlog",
 			{
 				prompt: input.prompt,
-			startInPlanMode: input.startInPlanMode,
-			autoReviewEnabled: input.autoReviewEnabled,
-			autoReviewMode: input.autoReviewMode,
-			agentId: undefined,
-			fallbackAgentId: undefined,
-			baseRef: resolvedBaseRef,
-		},
+				startInPlanMode: input.startInPlanMode,
+				autoReviewEnabled: input.autoReviewEnabled,
+				autoReviewMode: input.autoReviewMode,
+				agentId: undefined,
+				fallbackAgentId: undefined,
+				baseRef: resolvedBaseRef,
+			},
 			() => globalThis.crypto.randomUUID(),
 		);
 		return {
@@ -459,7 +461,8 @@ async function unlinkTasks(input: { cwd: string; dependencyId: string; projectPa
 	const workspaceId = await ensureRuntimeWorkspace(workspaceRepoPath);
 	const runtimeClient = createRuntimeTrpcClient(workspaceId);
 	const removedDependency = await updateRuntimeWorkspaceState(runtimeClient, workspaceRepoPath, (runtimeState) => {
-		const dependency = runtimeState.board.dependencies.find((candidate) => candidate.id === input.dependencyId) ?? null;
+		const dependency =
+			runtimeState.board.dependencies.find((candidate) => candidate.id === input.dependencyId) ?? null;
 		if (!dependency) {
 			throw new Error(`Dependency "${input.dependencyId}" was not found in workspace ${workspaceRepoPath}.`);
 		}
@@ -801,7 +804,9 @@ async function deleteTaskCommand(input: {
 			};
 		}
 
-		const deletedTasks = latestTargetRecords.map(({ task, columnId }) => formatTaskRecord(latestState, task, columnId));
+		const deletedTasks = latestTargetRecords.map(({ task, columnId }) =>
+			formatTaskRecord(latestState, task, columnId),
+		);
 		return {
 			board: deleted.board,
 			value: {
@@ -825,12 +830,14 @@ async function deleteTaskCommand(input: {
 		};
 	}
 
-	await Promise.all(mutation.value.deletedTaskIds.map(async (taskId) => await stopTaskRuntimeSession(runtimeClient, taskId)));
+	await Promise.all(
+		mutation.value.deletedTaskIds.map(async (taskId) => await stopTaskRuntimeSession(runtimeClient, taskId)),
+	);
 
 	const workspaceCleanupResults = await Promise.all(
 		mutation.value.deletedTaskIds.map(async (taskId) => ({
 			taskId,
-			...(await deleteTaskWorkspace(runtimeClient, taskId)),
+			...(await deleteTaskWorkspace(runtimeClient, taskId, { preserveJournal: false })),
 		})),
 	);
 

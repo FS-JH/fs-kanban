@@ -3,6 +3,7 @@ import type { RuntimeTaskSessionReviewReason, RuntimeTaskSessionSummary } from "
 export type SessionTransitionEvent =
 	| { type: "hook.to_review" }
 	| { type: "hook.to_in_progress" }
+	| { type: "agent.needs-input" }
 	| { type: "agent.prompt-ready" }
 	| { type: "process.exit"; exitCode: number | null; interrupted: boolean };
 
@@ -53,6 +54,36 @@ export function reduceSessionTransition(
 					reviewReason: null,
 				},
 				clearAttentionBuffer: true,
+			};
+		}
+		case "agent.needs-input": {
+			if (summary.state !== "running") {
+				return { changed: false, patch: {}, clearAttentionBuffer: false };
+			}
+			// Idempotency: don't churn state if marker already set.
+			const existing = summary.latestHookActivity;
+			if (
+				existing?.activityText === "Waiting for input" &&
+				existing?.notificationType === "user_attention"
+			) {
+				return { changed: false, patch: {}, clearAttentionBuffer: false };
+			}
+			return {
+				changed: true,
+				patch: {
+					state: "awaiting_review",
+					reviewReason: "attention",
+					latestHookActivity: {
+						activityText: "Waiting for input",
+						toolName: null,
+						toolInputSummary: null,
+						finalMessage: null,
+						hookEventName: "agent.prompt-ready",
+						notificationType: "user_attention",
+						source: summary.agentId,
+					},
+				},
+				clearAttentionBuffer: false,
 			};
 		}
 		case "process.exit": {

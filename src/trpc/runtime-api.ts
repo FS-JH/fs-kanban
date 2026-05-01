@@ -26,6 +26,7 @@ import {
 import { openInBrowser } from "../server/browser.js";
 import { buildRuntimeConfigResponse, resolveAgentCommand } from "../terminal/agent-registry.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
+import type { SupervisorApprovalQueue } from "../terminal/supervisor-approval-queue.js";
 import { resolveTaskCwd } from "../workspace/task-worktree.js";
 import { captureTaskTurnCheckpoint } from "../workspace/turn-checkpoints.js";
 import type { RuntimeTrpcContext, RuntimeTrpcWorkspaceScope } from "./app-router.js";
@@ -36,9 +37,11 @@ export interface CreateRuntimeApiDependencies {
 	loadScopedRuntimeConfig: (scope: RuntimeTrpcWorkspaceScope) => Promise<RuntimeConfigState>;
 	setActiveRuntimeConfig: (config: RuntimeConfigState) => void;
 	getScopedTerminalManager: (scope: RuntimeTrpcWorkspaceScope) => Promise<TerminalSessionManager>;
+	getTerminalManagerForWorkspace?: (workspaceId: string) => TerminalSessionManager | null;
 	resolveInteractiveShellCommand: () => { binary: string; args: string[] };
 	runCommand: (command: string, cwd: string) => Promise<RuntimeCommandRunResponse>;
 	prepareForStateReset?: () => Promise<void>;
+	approvalQueue?: SupervisorApprovalQueue;
 }
 
 async function resolveExistingTaskCwdOrEnsure(options: {
@@ -301,6 +304,54 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 			}
 			openInBrowser(filePath);
 			return { ok: true };
+		},
+		listApprovals: async (input) => {
+			const queue = deps.approvalQueue;
+			if (!queue) {
+				return { pending: [], recent: [] };
+			}
+			const all = queue.byWorkspace(input.workspaceId);
+			const pending = all.filter((entry) => entry.status === "pending");
+			const recent = all
+				.filter((entry) => entry.status !== "pending")
+				.sort((a, b) => (b.decidedAt ?? 0) - (a.decidedAt ?? 0))
+				.slice(0, 50);
+			return { pending: [...pending], recent: [...recent] };
+		},
+		decideApproval: async (input) => {
+			const queue = deps.approvalQueue;
+			if (!queue) {
+				throw new TRPCError({ code: "NOT_FOUND", message: "Approval queue not available." });
+			}
+			const request = queue.get(input.requestId);
+			if (!request || request.workspaceId !== input.workspaceId) {
+				throw new TRPCError({ code: "NOT_FOUND", message: "Approval request not found." });
+			}
+			const manager = deps.getTerminalManagerForWorkspace?.(input.workspaceId) ?? null;
+			if (!manager) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Workspace runtime is not active; restart the workspace and try again.",
+				});
+			}
+			const updated = manager.applyDecision(input.requestId, input.decision);
+			if (!updated) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Approval request is no longer actionable.",
+				});
+			}
+			return updated;
+		},
+		listApprovalHistory: async (input) => {
+			const queue = deps.approvalQueue;
+			if (!queue) return [];
+			const all = queue.byWorkspace(input.workspaceId);
+			const decided = all
+				.filter((entry) => entry.status !== "pending")
+				.sort((a, b) => (b.decidedAt ?? 0) - (a.decidedAt ?? 0));
+			const limit = input.limit ?? 100;
+			return decided.slice(0, limit).map((entry) => ({ ...entry }));
 		},
 	};
 }

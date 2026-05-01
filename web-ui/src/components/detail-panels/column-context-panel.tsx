@@ -1,5 +1,5 @@
 import { type BeforeCapture, DragDropContext, Droppable, type DropResult } from "@hello-pangea/dnd";
-import { ChevronDown, ChevronRight, Play, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -20,6 +20,7 @@ function ColumnSection({
 	onStartTask,
 	onStartAllTasks,
 	onRunBacklogCleanup,
+	onRestartBoardAgent,
 	onClearTrash,
 	editingTaskId,
 	inlineTaskEditor,
@@ -43,6 +44,7 @@ function ColumnSection({
 	onStartTask?: (taskId: string) => void;
 	onStartAllTasks?: () => void;
 	onRunBacklogCleanup?: () => void;
+	onRestartBoardAgent?: () => void;
 	onClearTrash?: () => void;
 	editingTaskId?: string | null;
 	inlineTaskEditor?: ReactNode;
@@ -61,6 +63,7 @@ function ColumnSection({
 	const canCreate = column.id === "backlog" && onCreateTask;
 	const canStartAllTasks = column.id === "backlog" && onStartAllTasks;
 	const canRunBacklogCleanup = column.id === "backlog" && onRunBacklogCleanup;
+	const canRestartBoardAgent = column.id === "backlog" && onRestartBoardAgent;
 	const canClearTrash = column.id === "trash" && onClearTrash;
 	const cardDropType = "CARD";
 	const isDropDisabled = isCardDropDisabled(column.id, activeDragSourceColumnId ?? null);
@@ -125,6 +128,19 @@ function ColumnSection({
 						title={
 							column.cards.length > 0 ? "Review and clean up backlog with the board agent" : "Backlog is empty"
 						}
+						style={{ marginRight: 4 }}
+					>
+						Clean up
+					</Button>
+				) : null}
+				{canRestartBoardAgent ? (
+					<Button
+						icon={<RotateCcw size={14} />}
+						variant="ghost"
+						size="sm"
+						onClick={onRestartBoardAgent}
+						aria-label="Restart board agent"
+						title="Restart board agent (use if it gets stuck)"
 						style={{ marginRight: 4 }}
 					/>
 				) : null}
@@ -248,6 +264,7 @@ export function ColumnContextPanel({
 	onStartTask,
 	onStartAllTasks,
 	onRunBacklogCleanup,
+	onRestartBoardAgent,
 	onClearTrash,
 	editingTaskId,
 	inlineTaskEditor,
@@ -269,6 +286,7 @@ export function ColumnContextPanel({
 	onStartTask?: (taskId: string) => void;
 	onStartAllTasks?: () => void;
 	onRunBacklogCleanup?: () => void;
+	onRestartBoardAgent?: () => void;
 	onClearTrash?: () => void;
 	editingTaskId?: string | null;
 	inlineTaskEditor?: ReactNode;
@@ -357,6 +375,7 @@ export function ColumnContextPanel({
 							onStartTask={column.id === "backlog" ? onStartTask : undefined}
 							onStartAllTasks={column.id === "backlog" ? onStartAllTasks : undefined}
 							onRunBacklogCleanup={column.id === "backlog" ? onRunBacklogCleanup : undefined}
+							onRestartBoardAgent={column.id === "backlog" ? onRestartBoardAgent : undefined}
 							onClearTrash={column.id === "trash" ? onClearTrash : undefined}
 							editingTaskId={column.id === "backlog" ? editingTaskId : null}
 							inlineTaskEditor={column.id === "backlog" ? inlineTaskEditor : undefined}

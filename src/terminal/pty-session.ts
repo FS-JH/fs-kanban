@@ -1,6 +1,6 @@
 import * as pty from "node-pty";
 
-const MAX_HISTORY_BYTES = 1024 * 1024;
+export const MAX_HISTORY_BYTES = 1024 * 1024;
 const WINDOWS_CMD_META_CHARS_REGEXP = /([()\][%!^"`<>&|;, *?])/g;
 
 export interface PtyExitEvent {
@@ -16,6 +16,7 @@ export interface SpawnPtySessionRequest {
 	cols: number;
 	rows: number;
 	onData?: (chunk: Buffer) => void;
+	outputSink?: (chunk: Buffer) => void;
 	onExit?: (event: PtyExitEvent) => void;
 }
 
@@ -112,6 +113,7 @@ export class PtySession {
 	private constructor(
 		ptyProcess: pty.IPty,
 		private readonly onDataCallback?: (chunk: Buffer) => void,
+		private readonly outputSink?: (chunk: Buffer) => void,
 		private readonly onExitCallback?: (event: PtyExitEvent) => void,
 	) {
 		this.ptyProcess = ptyProcess;
@@ -126,6 +128,7 @@ export class PtySession {
 				}
 				this.historyBytes -= shifted.byteLength;
 			}
+			this.outputSink?.(chunk);
 			this.onDataCallback?.(chunk);
 		});
 		this.ptyProcess.onExit((event) => {
@@ -134,7 +137,7 @@ export class PtySession {
 		});
 	}
 
-	static spawn({ binary, args = [], cwd, env, cols, rows, onData, onExit }: SpawnPtySessionRequest): PtySession {
+	static spawn({ binary, args = [], cwd, env, cols, rows, onData, outputSink, onExit }: SpawnPtySessionRequest): PtySession {
 		const normalizedArgs = typeof args === "string" ? [args] : args;
 		const terminalName = env?.TERM?.trim() || process.env.TERM?.trim() || "xterm-256color";
 		const useWindowsShellLaunch = shouldUseWindowsShellLaunch(binary);
@@ -152,7 +155,7 @@ export class PtySession {
 		};
 
 		const ptyProcess = pty.spawn(spawnBinary, spawnArgs, ptyOptions);
-		return new PtySession(ptyProcess, onData, onExit);
+		return new PtySession(ptyProcess, onData, outputSink, onExit);
 	}
 
 	get pid(): number {

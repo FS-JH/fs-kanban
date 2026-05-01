@@ -7,11 +7,11 @@ import type {
 	RuntimeGitSummaryResponse,
 	RuntimeGitSyncAction,
 	RuntimeGitSyncResponse,
+	RuntimeWorkspaceChangesMode,
+	RuntimeWorkspaceFileSearchResponse,
 	RuntimeWorkspaceImportBacklogTaskResult,
 	RuntimeWorkspaceImportBacklogTasksResponse,
 	RuntimeWorkspaceImportedTaskLookupResponse,
-	RuntimeWorkspaceChangesMode,
-	RuntimeWorkspaceFileSearchResponse,
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract.js";
 import {
@@ -20,7 +20,12 @@ import {
 	parseWorktreeEnsureRequest,
 } from "../core/api-validation.js";
 import { findTaskByExternalSource, upsertBacklogTaskByExternalSource } from "../core/task-board-mutations.js";
-import { saveWorkspaceStateById, WorkspaceStateConflictError } from "../state/workspace-state.js";
+import {
+	getWorkspaceJournalDir,
+	saveWorkspaceStateById,
+	WorkspaceStateConflictError,
+} from "../state/workspace-state.js";
+import { OutputJournal } from "../terminal/output-journal.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
 import {
 	createEmptyWorkspaceChangesResponse,
@@ -162,7 +167,9 @@ function createEmptyGitDiscardErrorResponse(error: unknown): RuntimeGitDiscardRe
 }
 
 function resolveDefaultBaseRef(workspaceState: RuntimeWorkspaceStateResponse): string {
-	return workspaceState.git.currentBranch ?? workspaceState.git.defaultBranch ?? workspaceState.git.branches[0] ?? "main";
+	return (
+		workspaceState.git.currentBranch ?? workspaceState.git.defaultBranch ?? workspaceState.git.branches[0] ?? "main"
+	);
 }
 
 function mergeLiveTaskSessions(
@@ -178,7 +185,9 @@ function mergeLiveTaskSessions(
 	return nextSessions;
 }
 
-function summarizeImportResults(results: RuntimeWorkspaceImportBacklogTaskResult[]): RuntimeWorkspaceImportBacklogTasksResponse {
+function summarizeImportResults(
+	results: RuntimeWorkspaceImportBacklogTaskResult[],
+): RuntimeWorkspaceImportBacklogTasksResponse {
 	let created = 0;
 	let updated = 0;
 	let unchanged = 0;
@@ -327,10 +336,17 @@ export function createWorkspaceApi(deps: CreateWorkspaceApiDependencies): Runtim
 		},
 		deleteWorktree: async (workspaceScope, input) => {
 			const body = parseWorktreeDeleteRequest(input);
-			return await deleteTaskWorktree({
+			const result = await deleteTaskWorktree({
 				repoPath: workspaceScope.workspacePath,
 				taskId: body.taskId,
 			});
+			if (result.ok && body.preserveJournal === false) {
+				await OutputJournal.deleteForTask({
+					dir: getWorkspaceJournalDir(workspaceScope.workspaceId),
+					taskId: body.taskId,
+				});
+			}
+			return result;
 		},
 		loadTaskContext: async (workspaceScope, input) => {
 			const normalizedInput = normalizeRequiredTaskWorkspaceScopeInput(input);

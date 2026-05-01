@@ -4,6 +4,7 @@
 import type { IncomingMessage } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 import type {
+	RuntimeApprovalRequest,
 	RuntimeStateStreamAggregateBoardUpdatedMessage,
 	RuntimeStateStreamAggregateSnapshotMessage,
 	RuntimeStateStreamErrorMessage,
@@ -18,6 +19,7 @@ import type {
 	RuntimeWorkspaceStateResponse,
 } from "../core/api-contract.js";
 import type { TerminalSessionManager } from "../terminal/session-manager.js";
+import type { SupervisorApprovalQueue } from "../terminal/supervisor-approval-queue.js";
 import { createWorkspaceMetadataMonitor } from "./workspace-metadata-monitor.js";
 import type { ResolvedWorkspaceStreamTarget, WorkspaceRegistry } from "./workspace-registry.js";
 
@@ -37,6 +39,7 @@ export interface CreateRuntimeStateHubDependencies {
 		| "invalidateWorkspaceSnapshotCache"
 		| "buildAggregateBoardSnapshot"
 	>;
+	approvalQueue?: SupervisorApprovalQueue;
 }
 
 export interface RuntimeStateHub {
@@ -54,6 +57,8 @@ export interface RuntimeStateHub {
 	broadcastRuntimeWorkspaceStateUpdated: (workspaceId: string, workspacePath: string) => Promise<void>;
 	broadcastRuntimeProjectsUpdated: (preferredCurrentProjectId: string | null) => Promise<void>;
 	broadcastTaskReadyForReview: (workspaceId: string, taskId: string) => void;
+	broadcastApprovalRequestQueued: (workspaceId: string, request: RuntimeApprovalRequest) => void;
+	broadcastApprovalRequestDecided: (workspaceId: string, request: RuntimeApprovalRequest) => void;
 	close: () => Promise<void>;
 }
 
@@ -450,6 +455,45 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		}
 	};
 
+	const broadcastApprovalRequestQueued = (workspaceId: string, request: RuntimeApprovalRequest) => {
+		const runtimeClients = runtimeStateClientsByWorkspaceId.get(workspaceId);
+		if (!runtimeClients || runtimeClients.size === 0) {
+			return;
+		}
+		const payload = {
+			type: "approval_request_queued" as const,
+			workspaceId,
+			request,
+		};
+		for (const client of runtimeClients) {
+			sendRuntimeStateMessage(client, payload);
+		}
+	};
+
+	const broadcastApprovalRequestDecided = (workspaceId: string, request: RuntimeApprovalRequest) => {
+		const runtimeClients = runtimeStateClientsByWorkspaceId.get(workspaceId);
+		if (!runtimeClients || runtimeClients.size === 0) {
+			return;
+		}
+		const payload = {
+			type: "approval_request_decided" as const,
+			workspaceId,
+			request,
+		};
+		for (const client of runtimeClients) {
+			sendRuntimeStateMessage(client, payload);
+		}
+	};
+
+	// Subscribe to the supervisor approval queue so backend events flow over WS.
+	const unsubscribeApprovalQueue = deps.approvalQueue?.subscribe((event) => {
+		if (event.type === "queued") {
+			broadcastApprovalRequestQueued(event.request.workspaceId, event.request);
+		} else {
+			broadcastApprovalRequestDecided(event.request.workspaceId, event.request);
+		}
+	});
+
 	runtimeStateWebSocketServer.on("connection", async (client: WebSocket, context: unknown) => {
 		client.on("close", () => {
 			cleanupRuntimeStateClient(client);
@@ -656,7 +700,10 @@ export function createRuntimeStateHub(deps: CreateRuntimeStateHubDependencies): 
 		broadcastRuntimeWorkspaceStateUpdated,
 		broadcastRuntimeProjectsUpdated,
 		broadcastTaskReadyForReview,
+		broadcastApprovalRequestQueued,
+		broadcastApprovalRequestDecided,
 		close: async () => {
+			unsubscribeApprovalQueue?.();
 			if (aggregateBoardBroadcastState.timer) {
 				clearTimeout(aggregateBoardBroadcastState.timer);
 				aggregateBoardBroadcastState.timer = null;

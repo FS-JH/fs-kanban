@@ -1,5 +1,5 @@
 import { Droppable } from "@hello-pangea/dnd";
-import { Play, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Play, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 
 import { BoardCard } from "@/components/board-card";
@@ -16,6 +16,7 @@ export function BoardColumn({
 	onStartTask,
 	onStartAllTasks,
 	onRunBacklogCleanup,
+	onRestartBoardAgent,
 	onClearTrash,
 	editingTaskId,
 	inlineTaskEditor,
@@ -45,6 +46,7 @@ export function BoardColumn({
 	onStartTask?: (taskId: string) => void;
 	onStartAllTasks?: () => void;
 	onRunBacklogCleanup?: () => void;
+	onRestartBoardAgent?: () => void;
 	onClearTrash?: () => void;
 	editingTaskId?: string | null;
 	inlineTaskEditor?: ReactNode;
@@ -71,6 +73,7 @@ export function BoardColumn({
 	const canCreate = column.id === "backlog" && onCreateTask;
 	const canStartAllTasks = column.id === "backlog" && onStartAllTasks;
 	const canRunBacklogCleanup = column.id === "backlog" && onRunBacklogCleanup;
+	const canRestartBoardAgent = column.id === "backlog" && onRestartBoardAgent;
 	const canClearTrash = column.id === "trash" && onClearTrash;
 	const cardDropType = "CARD";
 	const isDropDisabled = isCardDropDisabled(column.id, activeDragSourceColumnId ?? null, {
@@ -120,6 +123,18 @@ export function BoardColumn({
 									? "Review and clean up backlog with the board agent"
 									: "Backlog is empty"
 							}
+						>
+							Clean up
+						</Button>
+					) : null}
+					{canRestartBoardAgent ? (
+						<Button
+							icon={<RotateCcw size={14} />}
+							variant="ghost"
+							size="sm"
+							onClick={onRestartBoardAgent}
+							aria-label="Restart board agent"
+							title="Restart board agent (use if it gets stuck)"
 						/>
 					) : null}
 					{canStartAllTasks ? (

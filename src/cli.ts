@@ -313,7 +313,9 @@ async function startServer(): Promise<{
 		{ resolveInteractiveShellCommand },
 		{ shutdownRuntimeServer },
 		{ collectProjectWorktreeTaskIdsForRemoval, createWorkspaceRegistry },
-		{ reapStaleWorkspaceLocks },
+		{ reapStaleWorkspaceLocks, getAuditHomePath },
+		{ ApprovalAuditLog },
+		{ SupervisorApprovalQueue },
 	] = await Promise.all([
 		import("./projects/project-path.js"),
 		import("./server/directory-picker.js"),
@@ -323,7 +325,23 @@ async function startServer(): Promise<{
 		import("./server/shutdown-coordinator.js"),
 		import("./server/workspace-registry.js"),
 		import("./state/workspace-state.js"),
+		import("./terminal/approval-audit-log.js"),
+		import("./terminal/supervisor-approval-queue.js"),
 	]);
+
+	// Construct supervisor queue + audit log BEFORE createWorkspaceRegistry so
+	// every TerminalSessionManager built per workspace shares the same queue.
+	const approvalAuditLog = new ApprovalAuditLog({ dir: getAuditHomePath() });
+	const approvalQueue = new SupervisorApprovalQueue();
+	try {
+		const replayed = await ApprovalAuditLog.replay({ dir: getAuditHomePath() });
+		approvalQueue.rehydrate(replayed);
+	} catch (error) {
+		logError("approvalAuditLog.replay", error);
+	}
+	const unsubscribeApprovalAudit = approvalQueue.subscribe((event) => {
+		approvalAuditLog.record(event);
+	});
 
 	// Clean up any orphan lock files from a prior crash before the workspace
 	// registry begins touching the filesystem. Without this, pm2 restarts
@@ -339,12 +357,14 @@ async function startServer(): Promise<{
 		loadRuntimeConfig,
 		hasGitRepository,
 		pathIsDirectory,
+		approvalQueue,
 		onTerminalManagerReady: (workspaceId, manager) => {
 			runtimeStateHub?.trackTerminalManager(workspaceId, manager);
 		},
 	});
 	runtimeStateHub = createRuntimeStateHub({
 		workspaceRegistry,
+		approvalQueue,
 	});
 	const runtimeHub = runtimeStateHub;
 	for (const { workspaceId, terminalManager } of workspaceRegistry.listManagedWorkspaces()) {
@@ -367,6 +387,7 @@ async function startServer(): Promise<{
 	const runtimeServer = await createRuntimeServer({
 		workspaceRegistry,
 		runtimeStateHub: runtimeHub,
+		approvalQueue,
 		warn: (message) => {
 			console.warn(`[fs-kanban] ${message}`);
 		},
@@ -383,6 +404,10 @@ async function startServer(): Promise<{
 
 	const close = async () => {
 		await runtimeServer.close();
+		unsubscribeApprovalAudit();
+		await approvalAuditLog.close().catch((error) => {
+			logError("approvalAuditLog.close", error);
+		});
 	};
 
 	const shutdown = async (options?: { skipSessionCleanup?: boolean }) => {

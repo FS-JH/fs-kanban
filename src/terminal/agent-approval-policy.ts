@@ -1,4 +1,21 @@
-import type { RuntimeTaskHookActivity } from "../core/api-contract.js";
+import type { RuntimeAgentId, RuntimeTaskHookActivity } from "../core/api-contract.js";
+
+/**
+ * Per-agent keystroke conventions for approval prompts.
+ *
+ * Codex prompts respond to Enter (approve, the highlighted default) and to
+ * Escape (cancel/deny — dismisses the prompt without running the command).
+ * Claude's permission prompt is a numeric menu: `1` approve, `2` deny.
+ *
+ * IMPORTANT: deny MUST be distinct from approve so the Supervisor "Deny"
+ * action does not silently approve a codex prompt.
+ */
+const ESC = "\x1b";
+
+export const APPROVE_KEYSTROKES: Record<RuntimeAgentId, { approve: string; deny: string }> = {
+	codex: { approve: "\r", deny: ESC },
+	claude: { approve: "1\r", deny: "2\r" },
+};
 
 const PERMISSION_NOTIFICATION_TYPES = new Set(["permission_prompt", "permission.asked"]);
 const PERMISSION_HOOK_EVENT_NAMES = new Set([

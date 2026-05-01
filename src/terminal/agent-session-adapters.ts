@@ -163,6 +163,31 @@ function withPrompt(args: string[], prompt: string, mode: "append" | "flag", fla
 	};
 }
 
+function claudePromptDetector(data: string, summary: RuntimeTaskSessionSummary): SessionTransitionEvent | null {
+	const stripped = stripAnsi(data);
+	if (!/[╭│╰][^\n]*?>\s/.test(stripped)) {
+		return null;
+	}
+	if (summary.state === "running") {
+		return { type: "agent.needs-input" };
+	}
+	if (
+		summary.state === "awaiting_review" &&
+		(summary.reviewReason === "attention" || summary.reviewReason === "hook")
+	) {
+		return { type: "agent.prompt-ready" };
+	}
+	return null;
+}
+
+function shouldInspectClaudeOutputForTransition(summary: RuntimeTaskSessionSummary): boolean {
+	return (
+		summary.state === "running" ||
+		(summary.state === "awaiting_review" &&
+			(summary.reviewReason === "attention" || summary.reviewReason === "hook" || summary.reviewReason === "error"))
+	);
+}
+
 const claudeAdapter: AgentSessionAdapter = {
 	async prepare(input) {
 		const args = [...input.args];
@@ -206,7 +231,15 @@ const claudeAdapter: AgentSessionAdapter = {
 					PermissionRequest: [
 						{
 							matcher: "*",
-							hooks: [{ type: "command", command: buildHookCommand("to_review", { source: "claude" }) }],
+							hooks: [
+								{
+									type: "command",
+									command: buildHookCommand("to_review", {
+										source: "claude",
+										notificationType: "permission_prompt",
+									}),
+								},
+							],
 						},
 					],
 					PostToolUse: [
@@ -264,19 +297,24 @@ const claudeAdapter: AgentSessionAdapter = {
 				...withPromptLaunch.env,
 				...env,
 			},
+			detectOutputTransition: claudePromptDetector,
+			shouldInspectOutputForTransition: shouldInspectClaudeOutputForTransition,
 		};
 	},
 };
 
 function codexPromptDetector(data: string, summary: RuntimeTaskSessionSummary): SessionTransitionEvent | null {
-	if (summary.state !== "awaiting_review") {
-		return null;
-	}
-	if (summary.reviewReason !== "attention" && summary.reviewReason !== "hook") {
-		return null;
-	}
 	const stripped = stripAnsi(data);
-	if (/(?:^|\n)\s*›/.test(stripped)) {
+	if (!/(?:^|\n)\s*›/.test(stripped)) {
+		return null;
+	}
+	if (summary.state === "running") {
+		return { type: "agent.needs-input" };
+	}
+	if (
+		summary.state === "awaiting_review" &&
+		(summary.reviewReason === "attention" || summary.reviewReason === "hook")
+	) {
 		return { type: "agent.prompt-ready" };
 	}
 	return null;
@@ -284,8 +322,9 @@ function codexPromptDetector(data: string, summary: RuntimeTaskSessionSummary): 
 
 function shouldInspectCodexOutputForTransition(summary: RuntimeTaskSessionSummary): boolean {
 	return (
-		summary.state === "awaiting_review" &&
-		(summary.reviewReason === "attention" || summary.reviewReason === "hook" || summary.reviewReason === "error")
+		summary.state === "running" ||
+		(summary.state === "awaiting_review" &&
+			(summary.reviewReason === "attention" || summary.reviewReason === "hook" || summary.reviewReason === "error"))
 	);
 }
 

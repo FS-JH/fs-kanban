@@ -12,6 +12,7 @@ import {
 	Play,
 	Plus,
 	Settings,
+	ShieldCheck,
 	Terminal,
 } from "lucide-react";
 import { useState } from "react";
@@ -295,6 +296,8 @@ export function TopBar({
 	onToggleGitHistory,
 	isGitHistoryOpen,
 	onOpenSettings,
+	onOpenSupervisor,
+	supervisorPendingCount,
 	showDebugButton,
 	onOpenDebugDialog,
 	shortcuts,
@@ -329,6 +332,8 @@ export function TopBar({
 	onToggleGitHistory?: () => void;
 	isGitHistoryOpen?: boolean;
 	onOpenSettings?: (section?: SettingsSection) => void;
+	onOpenSupervisor?: () => void;
+	supervisorPendingCount?: number;
 	showDebugButton?: boolean;
 	onOpenDebugDialog?: () => void;
 	shortcuts?: RuntimeProjectShortcut[];
@@ -606,6 +611,21 @@ export function TopBar({
 						data-testid="open-debug-dialog-button"
 						className="ml-0.5 mr-0.5"
 					/>
+				) : null}
+				{onOpenSupervisor ? (
+					<Button
+						variant="ghost"
+						size="sm"
+						icon={<ShieldCheck size={16} />}
+						onClick={onOpenSupervisor}
+						aria-label="Supervisor"
+						data-testid="open-supervisor-button"
+						className="ml-0.5 mr-0.5"
+					>
+						{supervisorPendingCount && supervisorPendingCount > 0 ? (
+							<span className="text-xs text-status-orange">{supervisorPendingCount}</span>
+						) : null}
+					</Button>
 				) : null}
 				<Button
 					variant="ghost"

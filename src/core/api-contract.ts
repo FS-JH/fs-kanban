@@ -564,6 +564,80 @@ export const runtimeStateStreamErrorMessageSchema = z.object({
 });
 export type RuntimeStateStreamErrorMessage = z.infer<typeof runtimeStateStreamErrorMessageSchema>;
 
+// Supervisor approval queue contracts.
+export const runtimeApprovalDecisionSchema = z.enum([
+	"pending",
+	"auto_approved",
+	"auto_denied",
+	"user_approved",
+	"user_denied",
+	"timed_out",
+]);
+export type RuntimeApprovalDecision = z.infer<typeof runtimeApprovalDecisionSchema>;
+
+export const runtimeApprovalAutoDecisionSchema = z.object({
+	shouldAutoApprove: z.boolean(),
+	reason: z.string(),
+});
+export type RuntimeApprovalAutoDecision = z.infer<typeof runtimeApprovalAutoDecisionSchema>;
+
+export const runtimeApprovalRequestSchema = z.object({
+	id: z.string(),
+	taskId: z.string(),
+	workspaceId: z.string(),
+	agentId: runtimeAgentIdSchema.nullable(),
+	activity: runtimeTaskHookActivitySchema,
+	fingerprint: z.string(),
+	autoDecision: runtimeApprovalAutoDecisionSchema,
+	status: runtimeApprovalDecisionSchema,
+	createdAt: z.number(),
+	decidedAt: z.number().nullable(),
+	decidedBy: z.enum(["policy", "user"]).nullable(),
+});
+export type RuntimeApprovalRequest = z.infer<typeof runtimeApprovalRequestSchema>;
+
+export const runtimeApprovalsListInputSchema = z.object({
+	workspaceId: z.string(),
+});
+export type RuntimeApprovalsListInput = z.infer<typeof runtimeApprovalsListInputSchema>;
+
+export const runtimeApprovalsListResponseSchema = z.object({
+	pending: z.array(runtimeApprovalRequestSchema),
+	recent: z.array(runtimeApprovalRequestSchema),
+});
+export type RuntimeApprovalsListResponse = z.infer<typeof runtimeApprovalsListResponseSchema>;
+
+export const runtimeApprovalsDecideInputSchema = z.object({
+	workspaceId: z.string(),
+	requestId: z.string(),
+	decision: z.enum(["approved", "denied"]),
+});
+export type RuntimeApprovalsDecideInput = z.infer<typeof runtimeApprovalsDecideInputSchema>;
+
+export const runtimeApprovalsHistoryInputSchema = z.object({
+	workspaceId: z.string(),
+	limit: z.number().int().positive().max(500).optional(),
+});
+export type RuntimeApprovalsHistoryInput = z.infer<typeof runtimeApprovalsHistoryInputSchema>;
+
+export const runtimeStateStreamApprovalRequestQueuedMessageSchema = z.object({
+	type: z.literal("approval_request_queued"),
+	workspaceId: z.string(),
+	request: runtimeApprovalRequestSchema,
+});
+export type RuntimeStateStreamApprovalRequestQueuedMessage = z.infer<
+	typeof runtimeStateStreamApprovalRequestQueuedMessageSchema
+>;
+
+export const runtimeStateStreamApprovalRequestDecidedMessageSchema = z.object({
+	type: z.literal("approval_request_decided"),
+	workspaceId: z.string(),
+	request: runtimeApprovalRequestSchema,
+});
+export type RuntimeStateStreamApprovalRequestDecidedMessage = z.infer<
+	typeof runtimeStateStreamApprovalRequestDecidedMessageSchema
+>;
+
 export const runtimeStateStreamMessageSchema = z.discriminatedUnion("type", [
 	runtimeStateStreamSnapshotMessageSchema,
 	runtimeStateStreamWorkspaceStateMessageSchema,
@@ -573,6 +647,8 @@ export const runtimeStateStreamMessageSchema = z.discriminatedUnion("type", [
 	runtimeStateStreamTaskReadyForReviewMessageSchema,
 	runtimeStateStreamAggregateSnapshotMessageSchema,
 	runtimeStateStreamAggregateBoardUpdatedMessageSchema,
+	runtimeStateStreamApprovalRequestQueuedMessageSchema,
+	runtimeStateStreamApprovalRequestDecidedMessageSchema,
 	runtimeStateStreamErrorMessageSchema,
 ]);
 export type RuntimeStateStreamMessage = z.infer<typeof runtimeStateStreamMessageSchema>;
@@ -642,6 +718,7 @@ export type RuntimeWorktreeEnsureResponse = z.infer<typeof runtimeWorktreeEnsure
 
 export const runtimeWorktreeDeleteRequestSchema = z.object({
 	taskId: z.string(),
+	preserveJournal: z.boolean().default(true),
 });
 export type RuntimeWorktreeDeleteRequest = z.infer<typeof runtimeWorktreeDeleteRequestSchema>;
 
