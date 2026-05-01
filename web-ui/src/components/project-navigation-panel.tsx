@@ -16,7 +16,8 @@ import {
 } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
-import type { RuntimeProjectSummary } from "@/runtime/types";
+import { getRuntimeTaskSessionStatus, type RuntimeTaskSessionStatus } from "@/runtime/task-session-status";
+import type { RuntimeProjectSummary, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { formatPathForDisplay } from "@/utils/path-display";
 import { isMacPlatform, modifierKeyLabel } from "@/utils/platform";
 interface TaskCountBadge {
@@ -25,6 +26,22 @@ interface TaskCountBadge {
 	shortLabel: string;
 	toneClassName: string;
 	count: number;
+}
+
+const AGENT_STATUS_TONE_CLASS: Record<RuntimeTaskSessionStatus["tone"], string> = {
+	neutral: "bg-text-tertiary",
+	info: "bg-status-blue",
+	success: "bg-status-green",
+	warning: "bg-status-orange",
+	danger: "bg-status-red",
+};
+
+function shortenAgentActivityText(activityText: string | null | undefined): string | null {
+	if (!activityText) return null;
+	const trimmed = activityText.trim();
+	if (!trimmed) return null;
+	if (trimmed.length <= 140) return trimmed;
+	return `${trimmed.slice(0, 137)}…`;
 }
 
 export function ProjectNavigationPanel({
@@ -37,6 +54,7 @@ export function ProjectNavigationPanel({
 	onActiveSectionChange,
 	canShowAgentSection,
 	agentSectionContent,
+	agentSectionSummary,
 	onSelectAllProjects,
 	onSelectProject,
 	onRemoveProject,
@@ -51,11 +69,15 @@ export function ProjectNavigationPanel({
 	onActiveSectionChange: (section: "projects" | "agent") => void;
 	canShowAgentSection: boolean;
 	agentSectionContent?: ReactNode;
+	agentSectionSummary?: RuntimeTaskSessionSummary | null;
 	onSelectAllProjects: () => void;
 	onSelectProject: (projectId: string) => void;
 	onRemoveProject: (projectId: string) => Promise<boolean>;
 	onAddProject: () => void;
 }): React.ReactElement {
+	const agentStatus = canShowAgentSection ? getRuntimeTaskSessionStatus(agentSectionSummary ?? null) : null;
+	const agentDotClass = agentStatus ? (AGENT_STATUS_TONE_CLASS[agentStatus.tone] ?? "bg-text-tertiary") : null;
+	const agentLatestActivity = shortenAgentActivityText(agentSectionSummary?.latestHookActivity?.activityText);
 	const sortedProjects = [...projects].sort((a, b) => a.path.localeCompare(b.path));
 	const allProjectsTaskCount = projects.reduce(
 		(total, project) => total + project.taskCounts.in_progress + project.taskCounts.review,
@@ -205,21 +227,37 @@ export function ProjectNavigationPanel({
 							onClick={() => onActiveSectionChange("agent")}
 							disabled={!canShowAgentSection}
 							className={cn(
-								"cursor-pointer rounded-sm px-2 py-1 text-xs font-medium",
+								"cursor-pointer rounded-sm px-2 py-1 text-xs font-medium flex items-center justify-center gap-1.5",
 								activeSection === "agent"
 									? "bg-surface-4 text-text-primary"
 									: "text-text-secondary hover:text-text-primary",
 								!canShowAgentSection ? "cursor-not-allowed opacity-50" : null,
 							)}
+							title={agentStatus ? `Board agent: ${agentStatus.label}` : "Board Agent"}
 						>
-							Board Agent
+							{agentDotClass ? (
+								<span
+									className={cn(
+										"inline-block h-2 w-2 rounded-full shrink-0",
+										agentDotClass,
+										agentStatus?.isWaitingOnUser ? "animate-pulse" : null,
+									)}
+									aria-hidden
+								/>
+							) : null}
+							<span>Board Agent</span>
+							{agentStatus && agentStatus.kind !== "idle" ? (
+								<span className="text-text-tertiary text-[10px] font-normal">
+									· {agentStatus.label}
+								</span>
+							) : null}
 						</button>
 					</div>
 				</div>
 				{activeSection === "agent" ? (
 					<p className="text-text-tertiary text-xs" style={{ padding: "8px 4px 0" }}>
-						Add tasks, link dependencies, break work down, and manage your board. Try asking to
-						create and link some tasks to get started.
+						{agentLatestActivity ??
+							"Add tasks, link dependencies, break work down, and manage your board. Try asking to create and link some tasks to get started."}
 					</p>
 				) : null}
 			</div>
