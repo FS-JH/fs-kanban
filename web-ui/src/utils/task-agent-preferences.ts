@@ -11,7 +11,7 @@ export interface TaskAgentOption {
 }
 
 export interface TaskRetryAgentOption extends TaskAgentOption {
-	reason: "fallback" | "preferred" | "alternate";
+	reason: "fallback" | "preferred" | "alternate" | "resume";
 }
 
 const TASK_AGENT_ORDER: readonly RuntimeAgentId[] = ["codex", "claude"];
@@ -96,11 +96,20 @@ export function getTaskRetryAgentOptions(
 	summary: Pick<RuntimeTaskSessionSummary, "agentId" | "state"> | null,
 	config: RuntimeConfigResponse | null,
 ): TaskRetryAgentOption[] {
-	if (!config || (summary?.state !== "failed" && summary?.state !== "interrupted")) {
+	if (!config) {
+		return [];
+	}
+	// Show retry/resume buttons for any "ended" task session state. "idle"
+	// covers cleanly-finished review tasks where the user wants to wake the
+	// agent back up; "failed"/"interrupted" cover crash/abort cases.
+	const sessionState = summary?.state ?? null;
+	const isEndedSession =
+		sessionState === "failed" || sessionState === "interrupted" || sessionState === "idle" || sessionState === null;
+	if (!isEndedSession) {
 		return [];
 	}
 
-	const currentAgentId = summary.agentId;
+	const currentAgentId = summary?.agentId ?? null;
 	const preferredAgentId = resolveTaskPreferredAgentId(card, config);
 	const fallbackAgentId = resolveTaskFallbackAgentId(card, config);
 	const installedOptionsById = new Map(getInstalledTaskAgentOptions(config).map((agent) => [agent.id, agent]));
@@ -108,7 +117,13 @@ export function getTaskRetryAgentOptions(
 	const addedAgentIds = new Set<RuntimeAgentId>();
 
 	const appendRetryOption = (agentId: RuntimeAgentId | null, reason: TaskRetryAgentOption["reason"]): void => {
-		if (!agentId || agentId === currentAgentId || addedAgentIds.has(agentId)) {
+		if (!agentId || addedAgentIds.has(agentId)) {
+			return;
+		}
+		// "resume" is the only reason where we keep the current agent. The other
+		// reasons (fallback/preferred/alternate) skip the agent that already ran
+		// so the user retries with something different.
+		if (reason !== "resume" && agentId === currentAgentId) {
 			return;
 		}
 		const option = installedOptionsById.get(agentId);
@@ -122,6 +137,10 @@ export function getTaskRetryAgentOptions(
 		});
 	};
 
+	// Lead with "resume" using whichever agent the task previously ran with so
+	// the most common case — "wake this task back up" — is the primary button.
+	const resumeAgentId = currentAgentId ?? preferredAgentId;
+	appendRetryOption(resumeAgentId, "resume");
 	appendRetryOption(fallbackAgentId, "fallback");
 	appendRetryOption(preferredAgentId, "preferred");
 	for (const option of sortAgentOptions([...installedOptionsById.values()])) {

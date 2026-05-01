@@ -202,7 +202,10 @@ export function createRuntimeApi(deps: CreateRuntimeApiDependencies): RuntimeTrp
 		sendTaskSessionInput: async (workspaceScope, input) => {
 			try {
 				const body = parseTaskSessionInputRequest(input);
-				const payloadText = body.appendNewline ? `${body.text}\n` : body.text;
+				// TUIs (codex, claude) submit on CR not LF — sending "\n" alone
+				// inserts a literal newline in the input box without submitting.
+				// "\r" gets the prompt to fire.
+				const payloadText = body.appendNewline ? `${body.text}\r` : body.text;
 				const terminalManager = await deps.getScopedTerminalManager(workspaceScope);
 				const summary = terminalManager.writeInput(body.taskId, Buffer.from(payloadText, "utf8"));
 				if (!summary) {

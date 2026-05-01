@@ -110,17 +110,37 @@ describe("task-agent-preferences", () => {
 		expect(resolveTaskFallbackAgentId(card, config)).toBeNull();
 	});
 
-	it("prioritizes fallback retry options ahead of other installed alternates", () => {
+	it("leads with a resume option for the current agent and includes fallback alternates", () => {
 		const config = createRuntimeConfig();
 		const retryOptions = getTaskRetryAgentOptions(createCard(), createSummary({ agentId: "codex" }), config);
 
-		expect(retryOptions.map((option) => option.id)).toEqual(["claude"]);
-		expect(retryOptions[0]?.reason).toBe("fallback");
+		expect(retryOptions.map((option) => option.id)).toEqual(["codex", "claude"]);
+		expect(retryOptions[0]?.reason).toBe("resume");
+		expect(retryOptions[1]?.reason).toBe("fallback");
 	});
 
-	it("returns no retry options when the task is not failed or interrupted", () => {
+	it("offers a resume option for cleanly-finished idle tasks (review column)", () => {
+		const config = createRuntimeConfig();
+		const retryOptions = getTaskRetryAgentOptions(createCard(), createSummary({ state: "idle" }), config);
+
+		expect(retryOptions.length).toBeGreaterThan(0);
+		expect(retryOptions[0]?.reason).toBe("resume");
+	});
+
+	it("returns no retry options when the task session is currently running", () => {
 		const config = createRuntimeConfig();
 		const retryOptions = getTaskRetryAgentOptions(createCard(), createSummary({ state: "running" }), config);
+
+		expect(retryOptions).toEqual([]);
+	});
+
+	it("returns no retry options when the task session is in awaiting_review", () => {
+		const config = createRuntimeConfig();
+		const retryOptions = getTaskRetryAgentOptions(
+			createCard(),
+			createSummary({ state: "awaiting_review" }),
+			config,
+		);
 
 		expect(retryOptions).toEqual([]);
 	});
