@@ -21,7 +21,7 @@ import {
 	saveWorkspaceTaskReplayHistoryById,
 } from "../state/workspace-state.js";
 import { OutputJournal } from "../terminal/output-journal.js";
-import { TerminalSessionManager } from "../terminal/session-manager.js";
+import { normalizeStaleSessionSummary, TerminalSessionManager } from "../terminal/session-manager.js";
 import type { SupervisorApprovalQueue } from "../terminal/supervisor-approval-queue.js";
 import { getGitSyncSummary, probeGitWorkspaceState } from "../workspace/git-sync.js";
 import { getTaskWorkspacePathInfo } from "../workspace/task-worktree.js";
@@ -456,6 +456,15 @@ export async function createWorkspaceRegistry(deps: CreateWorkspaceRegistryDepen
 			if (terminalManager) {
 				for (const summary of terminalManager.listSummaries()) {
 					response.sessions[summary.taskId] = summary;
+				}
+			} else {
+				// No terminal manager => the disk state is, by definition, stale
+				// from a prior runtime invocation. Apply the same active-state
+				// normalization that hydrateFromRecord would so a stale "running"
+				// summary doesn't leak through to clients (which would render the
+				// home agent as live and block actions like backlog cleanup).
+				for (const [taskId, summary] of Object.entries(response.sessions)) {
+					response.sessions[taskId] = normalizeStaleSessionSummary(summary);
 				}
 			}
 			workspaceSnapshotCache.set(workspaceId, {
