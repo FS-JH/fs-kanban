@@ -1,7 +1,7 @@
 import "@xterm/xterm/css/xterm.css";
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Command, Ellipsis, Maximize2, MessageSquare, Minimize2, Trash2, X } from "lucide-react";
+import { Command, Ellipsis, Maximize2, MessageSquare, Minimize2, RotateCcw, Trash2, X } from "lucide-react";
 import type { MutableRefObject, ReactElement } from "react";
 import { useMemo } from "react";
 
@@ -56,6 +56,9 @@ export interface AgentTerminalPanelProps {
 	onSendAgentCommand?: () => void;
 	isExpanded?: boolean;
 	onToggleExpand?: () => void;
+	/** Optional callback to restart the underlying session — surfaced as a button
+	 * on the lastError banner when present. */
+	onRestart?: () => void;
 }
 
 function describeState(summary: RuntimeTaskSessionSummary | null): string {
@@ -226,6 +229,7 @@ function AgentTerminalPanelLayout({
 	onSendAgentCommand,
 	isExpanded = false,
 	onToggleExpand,
+	onRestart,
 	sessionControls,
 }: AgentTerminalPanelProps & { sessionControls: AgentTerminalSessionControls }): ReactElement {
 	const { containerRef, lastError, isStopping, clearTerminal, stopTerminal } = sessionControls;
@@ -390,8 +394,20 @@ function AgentTerminalPanelLayout({
 				/>
 			</div>
 			{lastError ? (
-				<div className="flex gap-2 rounded-none border-t border-status-red/30 bg-status-red/10 p-3 text-[13px] text-status-red">
-					{lastError}
+				<div className="flex items-center justify-between gap-3 rounded-none border-t border-status-red/30 bg-status-red/10 px-3 py-2 text-[13px] text-status-red">
+					<span className="min-w-0">{lastError}</span>
+					{onRestart ? (
+						<Button
+							variant="primary"
+							size="sm"
+							icon={<RotateCcw size={13} />}
+							onClick={onRestart}
+							aria-label="Restart agent"
+							className="shrink-0"
+						>
+							Restart
+						</Button>
+					) : null}
 				</div>
 			) : null}
 			{showMoveToTrash && onMoveToTrash ? (
