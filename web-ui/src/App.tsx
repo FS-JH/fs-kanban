@@ -988,6 +988,7 @@ export default function App(): ReactElement {
 					onActiveSectionChange={setHomeSidebarSection}
 					canShowAgentSection={!isAggregateView && !hasNoProjects && Boolean(currentProjectId)}
 					agentSectionContent={homeSidebarAgentPanel}
+					agentSectionSummary={homeSidebarAgentSummary}
 					onSelectAllProjects={() => {
 						setDetailOrigin("project");
 						handleSelectAllProjects();
