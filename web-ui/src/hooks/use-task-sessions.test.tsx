@@ -6,12 +6,17 @@ import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { BoardCard } from "@/types";
 
 const startTaskSessionMutateMock = vi.hoisted(() => vi.fn());
+const sendTaskSessionInputMutateMock = vi.hoisted(() => vi.fn());
+const getTerminalControllerMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/runtime/trpc-client", () => ({
 	getRuntimeTrpcClient: () => ({
 		runtime: {
 			startTaskSession: {
 				mutate: startTaskSessionMutateMock,
+			},
+			sendTaskSessionInput: {
+				mutate: sendTaskSessionInputMutateMock,
 			},
 		},
 	}),
@@ -21,8 +26,13 @@ vi.mock("@/runtime/task-session-geometry", () => ({
 	estimateTaskSessionGeometry: () => ({ cols: 120, rows: 40 }),
 }));
 
+vi.mock("@/terminal/terminal-controller-registry", () => ({
+	getTerminalController: getTerminalControllerMock,
+}));
+
 interface HookSnapshot {
 	startTaskSession: ReturnType<typeof useTaskSessions>["startTaskSession"];
+	sendTaskSessionInput: ReturnType<typeof useTaskSessions>["sendTaskSessionInput"];
 }
 
 function createTask(): BoardCard {
@@ -49,8 +59,9 @@ function HookHarness({ onSnapshot }: { onSnapshot: (snapshot: HookSnapshot) => v
 	useEffect(() => {
 		onSnapshot({
 			startTaskSession: sessions.startTaskSession,
+			sendTaskSessionInput: sessions.sendTaskSessionInput,
 		});
-	}, [onSnapshot, sessions.startTaskSession]);
+	}, [onSnapshot, sessions.sendTaskSessionInput, sessions.startTaskSession]);
 
 	return null;
 }
@@ -62,6 +73,9 @@ describe("useTaskSessions", () => {
 
 	beforeEach(() => {
 		startTaskSessionMutateMock.mockReset();
+		sendTaskSessionInputMutateMock.mockReset();
+		getTerminalControllerMock.mockReset();
+		getTerminalControllerMock.mockReturnValue(null);
 		startTaskSessionMutateMock.mockResolvedValue({
 			ok: true,
 			summary: {
@@ -78,6 +92,10 @@ describe("useTaskSessions", () => {
 				lastHookAt: null,
 				latestHookActivity: null,
 			},
+		});
+		sendTaskSessionInputMutateMock.mockResolvedValue({
+			ok: true,
+			summary: null,
 		});
 		previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
 			.IS_REACT_ACT_ENVIRONMENT;
@@ -98,6 +116,66 @@ describe("useTaskSessions", () => {
 			(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
 				previousActEnvironment;
 		}
+	});
+
+	it("submits mounted terminal input with carriage return when appending a newline", async () => {
+		const input = vi.fn(() => true);
+		const paste = vi.fn(() => false);
+		getTerminalControllerMock.mockReturnValue({
+			input,
+			paste,
+		});
+		let latestSnapshot: HookSnapshot | null = null;
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (latestSnapshot === null) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			await latestSnapshot?.sendTaskSessionInput("task-1", "Do the thing", { appendNewline: true });
+		});
+
+		expect(input).toHaveBeenCalledWith("Do the thing\r");
+		expect(paste).not.toHaveBeenCalled();
+		expect(sendTaskSessionInputMutateMock).not.toHaveBeenCalled();
+	});
+
+	it("falls back to runtime input when no mounted terminal controller is available", async () => {
+		let latestSnapshot: HookSnapshot | null = null;
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+		});
+
+		if (latestSnapshot === null) {
+			throw new Error("Expected a hook snapshot.");
+		}
+
+		await act(async () => {
+			await latestSnapshot?.sendTaskSessionInput("task-1", "Do the thing", { appendNewline: true });
+		});
+
+		expect(sendTaskSessionInputMutateMock).toHaveBeenCalledWith({
+			taskId: "task-1",
+			text: "Do the thing",
+			appendNewline: true,
+		});
 	});
 
 	it("starts a resume-from-trash session", async () => {
