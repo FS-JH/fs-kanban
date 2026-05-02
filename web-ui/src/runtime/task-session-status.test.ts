@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getRuntimeTaskSessionStatus } from "@/runtime/task-session-status";
+import {
+	canSendRuntimeTaskSessionPrompt,
+	getRuntimeTaskSessionStatus,
+	isRuntimeTaskSessionPromptReady,
+} from "@/runtime/task-session-status";
 import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 
 function createSummary(overrides: Partial<RuntimeTaskSessionSummary> = {}): RuntimeTaskSessionSummary {
@@ -64,6 +68,69 @@ describe("getRuntimeTaskSessionStatus", () => {
 
 		expect(status.kind).toBe("needs_input");
 		expect(status.label).toBe("Needs input");
+	});
+
+	it("detects agent prompt-ready attention as a sendable prompt state", () => {
+		const summary = createSummary({
+			state: "awaiting_review",
+			reviewReason: "attention",
+			latestHookActivity: {
+				activityText: "Waiting for input",
+				toolName: null,
+				toolInputSummary: null,
+				finalMessage: null,
+				hookEventName: "agent.prompt-ready",
+				notificationType: "user_attention",
+				source: "codex",
+			},
+		});
+
+		const status = getRuntimeTaskSessionStatus(summary);
+		expect(status.kind).toBe("prompt_ready");
+		expect(status.label).toBe("Ready for input");
+		expect(status.isWaitingOnUser).toBe(false);
+		expect(isRuntimeTaskSessionPromptReady(summary)).toBe(true);
+		expect(canSendRuntimeTaskSessionPrompt(summary)).toBe(true);
+	});
+
+	it("blocks sending a prompt while the session is waiting on a real user decision", () => {
+		const summary = createSummary({
+			state: "awaiting_review",
+			reviewReason: "attention",
+			latestHookActivity: {
+				activityText: null,
+				toolName: null,
+				toolInputSummary: null,
+				finalMessage: "Which project path should I use?",
+				hookEventName: "Notification",
+				notificationType: "user_attention",
+				source: "codex",
+			},
+		});
+
+		expect(canSendRuntimeTaskSessionPrompt(summary)).toBe(false);
+	});
+
+	it("does not treat stale prompt-ready activity as sendable after the process exits", () => {
+		const summary = createSummary({
+			state: "awaiting_review",
+			pid: null,
+			reviewReason: "exit",
+			exitCode: 0,
+			latestHookActivity: {
+				activityText: "Waiting for input",
+				toolName: null,
+				toolInputSummary: null,
+				finalMessage: null,
+				hookEventName: "agent.prompt-ready",
+				notificationType: "user_attention",
+				source: "codex",
+			},
+		});
+
+		expect(getRuntimeTaskSessionStatus(summary).kind).toBe("ready_for_review");
+		expect(isRuntimeTaskSessionPromptReady(summary)).toBe(false);
+		expect(canSendRuntimeTaskSessionPrompt(summary)).toBe(false);
 	});
 
 	it("classifies review exits caused by errors as needs review", () => {

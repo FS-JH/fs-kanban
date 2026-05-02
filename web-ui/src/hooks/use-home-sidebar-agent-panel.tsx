@@ -2,11 +2,14 @@
 // The home agent is always rendered as a terminal-backed local CLI session.
 import type { ReactElement } from "react";
 import { useCallback, useMemo, useState } from "react";
+import { RotateCcw } from "lucide-react";
 
 import { AgentTerminalPanel } from "@/components/detail-panels/agent-terminal-panel";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { selectNewestTaskSessionSummary } from "@/hooks/home-sidebar-agent-panel-session-summary";
 import { useHomeAgentSession } from "@/hooks/use-home-agent-session";
+import { getRuntimeTaskSessionStatus, type RuntimeTaskSessionTone } from "@/runtime/task-session-status";
 import type { RuntimeConfigResponse, RuntimeGitRepositoryInfo, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { TERMINAL_THEME_COLORS } from "@/terminal/theme-colors";
 
@@ -24,6 +27,14 @@ interface UseHomeSidebarAgentPanelResult {
 	taskId: string | null;
 	restartSession: () => Promise<void>;
 }
+
+const STATUS_DOT_CLASS: Record<RuntimeTaskSessionTone, string> = {
+	neutral: "bg-text-tertiary",
+	info: "bg-status-blue",
+	success: "bg-status-green",
+	warning: "bg-status-orange",
+	danger: "bg-status-red",
+};
 
 export function useHomeSidebarAgentPanel({
 	currentProjectId,
@@ -78,6 +89,7 @@ export function useHomeSidebarAgentPanel({
 	}, [runtimeProjectConfig]);
 
 	const homeAgentPanelSummary = taskId ? (effectiveSessionSummaries[taskId] ?? null) : null;
+	const homeAgentStatus = getRuntimeTaskSessionStatus(homeAgentPanelSummary);
 
 	if (hasNoProjects || !currentProjectId) {
 		return {
@@ -104,22 +116,45 @@ export function useHomeSidebarAgentPanel({
 	if (taskId) {
 		return {
 			panel: (
-				<AgentTerminalPanel
-					key={taskId}
-					taskId={taskId}
-					workspaceId={currentProjectId}
-					summary={homeAgentPanelSummary}
-					onSummary={upsertSessionSummary}
-					showSessionToolbar={false}
-					autoFocus
-					panelBackgroundColor={TERMINAL_THEME_COLORS.surfaceRaised}
-					terminalBackgroundColor={TERMINAL_THEME_COLORS.surfaceRaised}
-					cursorColor={TERMINAL_THEME_COLORS.textPrimary}
-					showRightBorder={false}
-					onRestart={() => {
-						void restartSession();
-					}}
-				/>
+				<div className="flex min-h-0 w-full flex-col overflow-hidden rounded-md border border-border bg-surface-2">
+					<div className="flex items-center justify-between gap-2 border-b border-border px-2 py-1.5">
+						<div className="flex min-w-0 items-center gap-2">
+							<span
+								className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT_CLASS[homeAgentStatus.tone]}`}
+								aria-hidden
+							/>
+							<span className="truncate text-xs font-medium text-text-primary">{homeAgentStatus.label}</span>
+						</div>
+						<Button
+							icon={<RotateCcw size={13} />}
+							variant="ghost"
+							size="sm"
+							onClick={() => {
+								void restartSession();
+							}}
+							aria-label="Restart board agent"
+							className="shrink-0"
+						/>
+					</div>
+					<div className="flex min-h-0 flex-1">
+						<AgentTerminalPanel
+							key={taskId}
+							taskId={taskId}
+							workspaceId={currentProjectId}
+							summary={homeAgentPanelSummary}
+							onSummary={upsertSessionSummary}
+							showSessionToolbar={false}
+							autoFocus
+							panelBackgroundColor={TERMINAL_THEME_COLORS.surfaceRaised}
+							terminalBackgroundColor={TERMINAL_THEME_COLORS.surfaceRaised}
+							cursorColor={TERMINAL_THEME_COLORS.textPrimary}
+							showRightBorder={false}
+							onRestart={() => {
+								void restartSession();
+							}}
+						/>
+					</div>
+				</div>
 			),
 			summary: homeAgentPanelSummary,
 			taskId,

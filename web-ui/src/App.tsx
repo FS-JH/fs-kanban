@@ -62,7 +62,7 @@ import { useTerminalPanels } from "@/hooks/use-terminal-panels";
 import { useWorkspaceSnapshotCache } from "@/hooks/use-workspace-snapshot-cache";
 import { useWorkspaceSync } from "@/hooks/use-workspace-sync";
 import { getTaskAgentNavbarHint, isTaskAgentSetupSatisfied } from "@/runtime/native-agent";
-import { getRuntimeTaskSessionStatus } from "@/runtime/task-session-status";
+import { canSendRuntimeTaskSessionPrompt, getRuntimeTaskSessionStatus } from "@/runtime/task-session-status";
 import type { RuntimeAggregateBoardCard, RuntimeTaskSessionSummary } from "@/runtime/types";
 import { useApprovalQueue } from "@/runtime/use-approval-queue";
 import { useRuntimeProjectConfig } from "@/runtime/use-runtime-project-config";
@@ -789,7 +789,7 @@ export default function App(): ReactElement {
 			});
 			return;
 		}
-		if (homeAgentStatus?.kind === "needs_input" || homeAgentStatus?.kind === "needs_review") {
+		if (!canSendRuntimeTaskSessionPrompt(homeSidebarAgentSummary)) {
 			showAppToast({
 				intent: "warning",
 				message: "Board agent already needs your attention. Resolve that first, then run cleanup again.",
@@ -797,15 +797,25 @@ export default function App(): ReactElement {
 			});
 			return;
 		}
-		// Fall through for: idle / awaiting_review (ready_for_review) / running
-		// without active work / no summary yet (just-started). The runtime
-		// buffers the cleanup prompt; codex/claude pick it up on the next
-		// prompt cycle.
-		const result = await sendTaskSessionInput(homeSidebarAgentTaskId, BACKLOG_CLEANUP_PROMPT, {
-			appendNewline: true,
+		// Fall through for: idle / prompt-ready / ready_for_review / running
+		// without active work / no summary yet. The runtime buffers the cleanup
+		// prompt; codex/claude pick it up on the next prompt cycle.
+		const typed = await sendTaskSessionInput(homeSidebarAgentTaskId, BACKLOG_CLEANUP_PROMPT, {
+			appendNewline: false,
+			mode: "paste",
 		});
-		if (!result.ok) {
-			notifyError(result.message ?? "Could not start backlog cleanup.");
+		if (!typed.ok) {
+			notifyError(typed.message ?? "Could not send backlog cleanup instructions.");
+			return;
+		}
+		await new Promise<void>((resolve) => {
+			window.setTimeout(resolve, 200);
+		});
+		const submitted = await sendTaskSessionInput(homeSidebarAgentTaskId, "\r", {
+			appendNewline: false,
+		});
+		if (!submitted.ok) {
+			notifyError(submitted.message ?? "Could not start backlog cleanup.");
 			return;
 		}
 		showAppToast({

@@ -3,6 +3,7 @@ import type { RuntimeTaskSessionSummary } from "@/runtime/types";
 export type RuntimeTaskSessionStatusKind =
 	| "idle"
 	| "running"
+	| "prompt_ready"
 	| "ready_for_review"
 	| "needs_approval"
 	| "needs_input"
@@ -38,7 +39,32 @@ function hasPermissionPromptSignal(summary: RuntimeTaskSessionSummary): boolean 
 
 function hasUserAttentionSignal(summary: RuntimeTaskSessionSummary): boolean {
 	const notificationType = normalizeText(summary.latestHookActivity?.notificationType)?.toLowerCase() ?? null;
-	return notificationType === "user_attention";
+	const hookEventName = normalizeText(summary.latestHookActivity?.hookEventName)?.toLowerCase() ?? null;
+	return notificationType === "user_attention" && hookEventName !== "agent.prompt-ready";
+}
+
+export function isRuntimeTaskSessionPromptReady(
+	summary: RuntimeTaskSessionSummary | null | undefined,
+): boolean {
+	if (!summary || summary.pid === null) {
+		return false;
+	}
+	const hookEventName = normalizeText(summary?.latestHookActivity?.hookEventName)?.toLowerCase() ?? null;
+	return hookEventName === "agent.prompt-ready";
+}
+
+export function canSendRuntimeTaskSessionPrompt(summary: RuntimeTaskSessionSummary | null | undefined): boolean {
+	if (summary && summary.pid === null) {
+		return false;
+	}
+	const status = getRuntimeTaskSessionStatus(summary);
+	if (status.kind === "needs_approval" || status.kind === "needs_review") {
+		return false;
+	}
+	if (status.kind === "needs_input") {
+		return isRuntimeTaskSessionPromptReady(summary);
+	}
+	return true;
 }
 
 export function getRuntimeTaskSessionStatus(
@@ -98,7 +124,18 @@ export function getRuntimeTaskSessionStatus(
 		};
 	}
 
-	if (summary.reviewReason === "attention" || hasUserAttentionSignal(summary)) {
+	if (isRuntimeTaskSessionPromptReady(summary)) {
+		return {
+			kind: "prompt_ready",
+			label: "Ready for input",
+			tone: "success",
+			isWaitingOnUser: false,
+		};
+	}
+
+	const hasPromptReadyActivity =
+		normalizeText(summary.latestHookActivity?.hookEventName)?.toLowerCase() === "agent.prompt-ready";
+	if ((summary.reviewReason === "attention" && !hasPromptReadyActivity) || hasUserAttentionSignal(summary)) {
 		return {
 			kind: "needs_input",
 			label: "Needs input",

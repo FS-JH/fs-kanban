@@ -52,6 +52,7 @@ export function reduceSessionTransition(
 				patch: {
 					state: "running",
 					reviewReason: null,
+					latestHookActivity: null,
 				},
 				clearAttentionBuffer: true,
 			};
