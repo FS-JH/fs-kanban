@@ -63,3 +63,29 @@ describe("reduceSessionTransition — agent.needs-input", () => {
 		expect(result.changed).toBe(false);
 	});
 });
+
+describe("reduceSessionTransition — agent.prompt-ready", () => {
+	it("returns an attention prompt to running and clears the stale prompt marker", () => {
+		const result = reduceSessionTransition(
+			summary({
+				state: "awaiting_review",
+				reviewReason: "attention",
+				latestHookActivity: {
+					activityText: "Waiting for input",
+					toolName: null,
+					toolInputSummary: null,
+					finalMessage: null,
+					hookEventName: "agent.prompt-ready",
+					notificationType: "user_attention",
+					source: "codex",
+				},
+			}),
+			{ type: "agent.prompt-ready" },
+		);
+
+		expect(result.changed).toBe(true);
+		expect(result.patch.state).toBe("running");
+		expect(result.patch.reviewReason).toBeNull();
+		expect(result.patch.latestHookActivity).toBeNull();
+	});
+});

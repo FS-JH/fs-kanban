@@ -79,6 +79,10 @@ function buildHomeAgentSessionKey(session: HomeAgentSessionIdentity): string {
 	return `${session.workspaceId}:${session.taskId}`;
 }
 
+function isActiveHomeAgentSummary(summary: RuntimeTaskSessionSummary): boolean {
+	return summary.pid !== null && (summary.state === "running" || summary.state === "awaiting_review");
+}
+
 async function stopHomeAgentSession(session: HomeAgentSessionIdentity | null): Promise<void> {
 	if (!session) {
 		return;
@@ -205,14 +209,14 @@ export function useHomeAgentSession({
 		if (desiredTaskIdByWorkspaceRef.current.get(session.workspaceId) !== session.taskId) {
 			return;
 		}
-		if (startedSessionKeysRef.current.has(sessionKey)) {
-			return;
-		}
 		const existingSummary = sessionSummaries[session.taskId];
-		if (
-			existingSummary &&
-			(existingSummary.state === "running" || existingSummary.state === "awaiting_review")
-		) {
+		if (startedSessionKeysRef.current.has(sessionKey)) {
+			if (!existingSummary || isActiveHomeAgentSummary(existingSummary)) {
+				return;
+			}
+			startedSessionKeysRef.current.delete(sessionKey);
+		}
+		if (existingSummary && isActiveHomeAgentSummary(existingSummary)) {
 			startedSessionKeysRef.current.add(sessionKey);
 			return;
 		}
@@ -287,9 +291,9 @@ export function useHomeAgentSession({
 			workspaceId: currentProjectId,
 			taskId: descriptorTaskId,
 		});
-		// Stop the running session on the server. The auto-restart effect below
-		// will mint a fresh one because we clear the started-key marker and the
-		// stale summary so the start gate (line ~211) does not short-circuit.
+		// Stop the running session on the server. The auto-start effect will
+		// mint a fresh one after the local started marker is cleared; ended
+		// summaries from the runtime stream do not block the next start.
 		await stopHomeAgentSession({
 			workspaceId: currentProjectId,
 			taskId: descriptorTaskId,

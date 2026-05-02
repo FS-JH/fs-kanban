@@ -44,6 +44,10 @@ function shortenAgentActivityText(activityText: string | null | undefined): stri
 	return `${trimmed.slice(0, 137)}…`;
 }
 
+function isPromptReadyActivity(summary: RuntimeTaskSessionSummary | null | undefined): boolean {
+	return summary?.latestHookActivity?.hookEventName?.trim().toLowerCase() === "agent.prompt-ready";
+}
+
 export function ProjectNavigationPanel({
 	projects,
 	isLoadingProjects = false,
@@ -77,7 +81,9 @@ export function ProjectNavigationPanel({
 }): React.ReactElement {
 	const agentStatus = canShowAgentSection ? getRuntimeTaskSessionStatus(agentSectionSummary ?? null) : null;
 	const agentDotClass = agentStatus ? (AGENT_STATUS_TONE_CLASS[agentStatus.tone] ?? "bg-text-tertiary") : null;
-	const agentLatestActivity = shortenAgentActivityText(agentSectionSummary?.latestHookActivity?.activityText);
+	const agentLatestActivity = isPromptReadyActivity(agentSectionSummary)
+		? null
+		: shortenAgentActivityText(agentSectionSummary?.latestHookActivity?.activityText);
 	const sortedProjects = [...projects].sort((a, b) => a.path.localeCompare(b.path));
 	const allProjectsTaskCount = projects.reduce(
 		(total, project) => total + project.taskCounts.in_progress + project.taskCounts.review,
@@ -249,11 +255,10 @@ export function ProjectNavigationPanel({
 						</button>
 					</div>
 				</div>
-				{/* Surface latest activity ONLY when on the agent tab AND the agent is
-				    fresh (no session yet, or no recorded activity). Once the agent has
-				    output, the terminal itself is the source of truth — the static help
-				    blurb above it is just visual noise that creates the empty-gap look
-				    in the screenshot. */}
+				{/* Surface only actionable non-prompt activity above the agent terminal.
+				    Prompt-ready activity is represented by the status dot/header and can
+				    outlive the process after an interrupt, so showing its raw text here
+				    creates a stale "Waiting for input" label. */}
 				{activeSection === "agent" && !agentSectionSummary ? (
 					<p className="text-text-tertiary text-xs" style={{ padding: "8px 4px 0" }}>
 						Add tasks, link dependencies, break work down, and manage your board. Try asking to

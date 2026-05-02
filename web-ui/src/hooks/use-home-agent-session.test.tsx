@@ -1,6 +1,7 @@
 import { act, useCallback, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHomeAgentSessionId } from "@runtime-home-agent-session";
 
 import { useHomeAgentSession } from "@/hooks/use-home-agent-session";
 import type { RuntimeConfigResponse, RuntimeGitRepositoryInfo, RuntimeTaskSessionSummary } from "@/runtime/types";
@@ -35,6 +36,9 @@ interface HookSnapshot {
 	taskId: string | null;
 }
 
+type SummaryState = RuntimeTaskSessionSummary["state"];
+type SummaryAgentId = NonNullable<RuntimeTaskSessionSummary["agentId"]>;
+
 function expectHookSnapshot(snapshot: HookSnapshot | null): HookSnapshot {
 	if (!snapshot) {
 		throw new Error("Expected a home agent snapshot.");
@@ -42,14 +46,19 @@ function expectHookSnapshot(snapshot: HookSnapshot | null): HookSnapshot {
 	return snapshot;
 }
 
-function createSummary(taskId: string, agentId: RuntimeTaskSessionSummary["agentId"]): RuntimeTaskSessionSummary {
+function createSummary(
+	taskId: string,
+	agentId: SummaryAgentId,
+	state: SummaryState = "running",
+	overrides: Partial<RuntimeTaskSessionSummary> = {},
+): RuntimeTaskSessionSummary {
 	return {
 		taskId,
-		state: "running",
+		state,
 		mode: "act",
 		agentId,
 		workspacePath: "/tmp/repo",
-		pid: 1234,
+		pid: state === "running" || state === "awaiting_review" ? 1234 : null,
 		startedAt: Date.now(),
 		updatedAt: Date.now(),
 		lastOutputAt: Date.now(),
@@ -59,7 +68,16 @@ function createSummary(taskId: string, agentId: RuntimeTaskSessionSummary["agent
 		latestHookActivity: null,
 		latestTurnCheckpoint: null,
 		previousTurnCheckpoint: null,
+		...overrides,
 	};
+}
+
+function resolveHomeAgentId(taskId: string): SummaryAgentId {
+	const agentId = taskId.split(":").pop();
+	if (agentId === "claude" || agentId === "codex") {
+		return agentId;
+	}
+	throw new Error(`Expected home agent task id to end with an agent id: ${taskId}`);
 }
 
 function createRuntimeConfig(overrides: Partial<RuntimeConfigResponse> = {}): RuntimeConfigResponse {
@@ -120,13 +138,23 @@ function HookHarness({
 	currentProjectId,
 	onSnapshot,
 	workspaceGit = DEFAULT_WORKSPACE_GIT,
+	initialSessionSummaries = {},
+	sessionSummariesOverride,
 }: {
 	config: RuntimeConfigResponse | null;
 	currentProjectId: string | null;
 	onSnapshot: (snapshot: HookSnapshot) => void;
 	workspaceGit?: RuntimeGitRepositoryInfo | null;
+	initialSessionSummaries?: Record<string, RuntimeTaskSessionSummary>;
+	sessionSummariesOverride?: Record<string, RuntimeTaskSessionSummary>;
 }): null {
-	const [sessionSummaries, setSessionSummaries] = useState<Record<string, RuntimeTaskSessionSummary>>({});
+	const [sessionSummaries, setSessionSummaries] =
+		useState<Record<string, RuntimeTaskSessionSummary>>(initialSessionSummaries);
+	useEffect(() => {
+		if (sessionSummariesOverride) {
+			setSessionSummaries(sessionSummariesOverride);
+		}
+	}, [sessionSummariesOverride]);
 	const upsertSessionSummary = useCallback((summary: RuntimeTaskSessionSummary) => {
 		setSessionSummaries((currentSessions) => ({
 			...currentSessions,
@@ -161,9 +189,9 @@ describe("useHomeAgentSession", () => {
 		startTaskSessionMutateMock.mockReset();
 		stopTaskSessionMutateMock.mockReset();
 		startTaskSessionMutateMock.mockImplementation(
-			async ({ taskId, agentId }: { taskId: string; agentId: "codex" | "claude" }) => ({
+			async ({ taskId }: { taskId: string }) => ({
 				ok: true,
-				summary: createSummary(taskId, agentId),
+				summary: createSummary(taskId, resolveHomeAgentId(taskId)),
 			}),
 		);
 		notifyErrorMock.mockReset();
@@ -206,11 +234,173 @@ describe("useHomeAgentSession", () => {
 		});
 
 		const snapshot = expectHookSnapshot(latestSnapshot);
-		expect(snapshot.taskId).toMatch(/^__home_agent__:workspace-1:codex$/);
+		expect(snapshot.taskId).toBe(createHomeAgentSessionId("workspace-1", "codex"));
 		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				workspaceId: "workspace-1",
 				taskId: snapshot.taskId,
+				baseRef: "main",
+			}),
+		);
+	});
+
+	it.each(["interrupted", "failed", "idle"] satisfies SummaryState[])(
+		"starts a fresh home terminal session when the existing summary is %s",
+		async (existingState) => {
+			const taskId = createHomeAgentSessionId("workspace-1", "codex");
+			let latestSnapshot: HookSnapshot | null = null;
+
+			await act(async () => {
+				root.render(
+					<HookHarness
+						config={createRuntimeConfig()}
+						currentProjectId="workspace-1"
+						initialSessionSummaries={{
+							[taskId]: createSummary(taskId, "codex", existingState),
+						}}
+						onSnapshot={(snapshot) => {
+							latestSnapshot = snapshot;
+						}}
+					/>,
+				);
+				await Promise.resolve();
+				await Promise.resolve();
+			});
+
+			const snapshot = expectHookSnapshot(latestSnapshot);
+			expect(snapshot.taskId).toBe(taskId);
+			expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					workspaceId: "workspace-1",
+					taskId,
+					baseRef: "main",
+				}),
+			);
+		},
+	);
+
+	it.each(["running", "awaiting_review"] satisfies SummaryState[])(
+		"does not start a duplicate home terminal session when the existing summary is %s",
+		async (existingState) => {
+			const taskId = createHomeAgentSessionId("workspace-1", "codex");
+			let latestSnapshot: HookSnapshot | null = null;
+
+			await act(async () => {
+				root.render(
+					<HookHarness
+						config={createRuntimeConfig()}
+						currentProjectId="workspace-1"
+						initialSessionSummaries={{
+							[taskId]: createSummary(taskId, "codex", existingState),
+						}}
+						onSnapshot={(snapshot) => {
+							latestSnapshot = snapshot;
+						}}
+					/>,
+				);
+				await Promise.resolve();
+				await Promise.resolve();
+			});
+
+			const snapshot = expectHookSnapshot(latestSnapshot);
+			expect(snapshot.taskId).toBe(taskId);
+			expect(startTaskSessionMutateMock).not.toHaveBeenCalled();
+		},
+	);
+
+	it("starts a fresh home terminal session when an awaiting-review summary has no live process", async () => {
+		const taskId = createHomeAgentSessionId("workspace-1", "codex");
+		let latestSnapshot: HookSnapshot | null = null;
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					config={createRuntimeConfig()}
+					currentProjectId="workspace-1"
+					initialSessionSummaries={{
+						[taskId]: createSummary(taskId, "codex", "awaiting_review", {
+							pid: null,
+							reviewReason: "exit",
+							exitCode: 0,
+						}),
+					}}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+
+		const snapshot = expectHookSnapshot(latestSnapshot);
+		expect(snapshot.taskId).toBe(taskId);
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				workspaceId: "workspace-1",
+				taskId,
+				baseRef: "main",
+			}),
+		);
+	});
+
+	it("starts a fresh home terminal session after an active summary exits in the same mount", async () => {
+		const taskId = createHomeAgentSessionId("workspace-1", "codex");
+		let latestSnapshot: HookSnapshot | null = null;
+		const activeSummary = createSummary(taskId, "codex", "awaiting_review");
+		const exitedSummary = createSummary(taskId, "codex", "awaiting_review", {
+			pid: null,
+			reviewReason: "exit",
+			exitCode: 0,
+			updatedAt: activeSummary.updatedAt + 1,
+		});
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					config={createRuntimeConfig()}
+					currentProjectId="workspace-1"
+					initialSessionSummaries={{
+						[taskId]: activeSummary,
+					}}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+
+		expect(startTaskSessionMutateMock).not.toHaveBeenCalled();
+
+		await act(async () => {
+			root.render(
+				<HookHarness
+					config={createRuntimeConfig()}
+					currentProjectId="workspace-1"
+					initialSessionSummaries={{
+						[taskId]: activeSummary,
+					}}
+					sessionSummariesOverride={{
+						[taskId]: exitedSummary,
+					}}
+					onSnapshot={(snapshot) => {
+						latestSnapshot = snapshot;
+					}}
+				/>,
+			);
+			await Promise.resolve();
+			await Promise.resolve();
+			await Promise.resolve();
+		});
+
+		const snapshot = expectHookSnapshot(latestSnapshot);
+		expect(snapshot.taskId).toBe(taskId);
+		expect(startTaskSessionMutateMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				workspaceId: "workspace-1",
+				taskId,
 				baseRef: "main",
 			}),
 		);
@@ -277,7 +467,7 @@ describe("useHomeAgentSession", () => {
 		});
 
 		const secondSnapshot = expectHookSnapshot(latestSnapshot);
-		expect(secondSnapshot.taskId).toMatch(/^__home_agent__:workspace-1:claude$/);
+		expect(secondSnapshot.taskId).toBe(createHomeAgentSessionId("workspace-1", "claude"));
 		expect(secondSnapshot.taskId).not.toBe(firstTaskId);
 		expect(stopTaskSessionMutateMock).toHaveBeenCalledWith({
 			workspaceId: "workspace-1",
